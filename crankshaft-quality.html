@@ -1,0 +1,1364 @@
+<title>크랭크샤프트 품질 예측</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 관제실 — 왼쪽 조건 랙(입력), 오른쪽 계측 판독(예측), 아래 공정 기록 대장(이력·모델) */
+:root{
+  --bg:#eef1f4; --surface:#ffffff; --surface-2:#e6eaef; --line:#d2d9e0; --fg:#16202a; --muted:#566473;
+  --accent:#12638a; --accent-soft:#d9eaf2; --on-accent:#ffffff;
+  --ok:#1d8048; --ok-soft:#dcf0e3; --warn:#c46f12; --warn-soft:#fbead4; --bad:#c8312a; --bad-soft:#f8dcd9;
+  --spec:#cfe9d8; --track:#e3e8ed;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1418; --surface:#161d23; --surface-2:#1d262e; --line:#2c3843; --fg:#e4e9ee; --muted:#93a1ae;
+  --accent:#5bb4dc; --accent-soft:#16303d; --on-accent:#08131a;
+  --ok:#47c27c; --ok-soft:#173326; --warn:#f0a24a; --warn-soft:#3a2a15; --bad:#f2685c; --bad-soft:#3d1c1a;
+  --spec:#1c3a2a; --track:#232e37; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1418; --surface:#161d23; --surface-2:#1d262e; --line:#2c3843; --fg:#e4e9ee; --muted:#93a1ae;
+  --accent:#5bb4dc; --accent-soft:#16303d; --on-accent:#08131a;
+  --ok:#47c27c; --ok-soft:#173326; --warn:#f0a24a; --warn-soft:#3a2a15; --bad:#f2685c; --bad-soft:#3d1c1a;
+  --spec:#1c3a2a; --track:#232e37; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 32px}
+.wrap{max-width:1360px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:700}
+.num,.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* header */
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.route{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;font-size:12px}
+.route span{padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--surface)}
+.route span.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);font-weight:600}
+.route i{font-style:normal;color:var(--muted);align-self:center}
+.scen{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 12px;font-weight:500}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:3px 9px;font-size:12px}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kpi .lab{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-weight:600}
+.kpi .val{font-family:var(--f-mono);font-size:30px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:14px;color:var(--muted);font-weight:500;margin-left:2px}
+.kpi .sub{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.s-pass{color:var(--ok);background:var(--ok-soft)}
+.s-warn{color:var(--warn);background:var(--warn-soft)}
+.s-fail{color:var(--bad);background:var(--bad-soft)}
+.c-pass{color:var(--ok)}.c-warn{color:var(--warn)}.c-fail{color:var(--bad)}
+
+/* main grid */
+.main{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:16px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;min-width:0}
+.panel-h{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;margin-bottom:12px}
+.right{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* condition rack */
+.rack{position:sticky;top:12px}
+.tabs{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:7px;margin-bottom:12px;overflow-x:auto}
+.tabs button{flex:1 0 auto;border:0;background:transparent;padding:6px 8px;border-radius:5px;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
+.tabs .badge{display:inline-block;min-width:16px;margin-left:4px;padding:0 4px;border-radius:8px;font-size:10px;background:var(--warn-soft);color:var(--warn);font-family:var(--f-mono)}
+.var{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;padding:10px 8px;border-radius:6px;border:1px solid transparent}
+.var + .var{margin-top:2px}
+.var.changed{background:var(--accent-soft)}
+.var label{font-weight:600;font-size:13px}
+.var .ref{grid-column:1/-1;display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:var(--f-mono)}
+.var .nbox{display:flex;align-items:center;gap:4px}
+.var input[type=number]{width:78px;text-align:right;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.var .unit{font-size:12px;color:var(--muted);min-width:42px}
+.var input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent);margin:4px 0 0}
+.fixed-note{font-size:11px;color:var(--muted);margin:2px 0 8px}
+.rack-foot{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* gauges */
+.gauges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.gauge{border:1px solid var(--line);border-radius:7px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.gauge .gh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.gauge .gn{font-weight:600;font-size:13px}
+.gauge .gv{font-family:var(--f-mono);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.gauge .gv small{font-size:12px;color:var(--muted);font-weight:500}
+.gauge .ci{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.bar{position:relative;height:22px;margin-top:2px}
+.bar .tr{position:absolute;left:0;right:0;top:8px;height:6px;border-radius:3px;background:var(--track)}
+.bar .sp{position:absolute;top:8px;height:6px;background:var(--spec);border-left:2px solid var(--ok);border-right:2px solid var(--ok)}
+.bar .sp.open-l{border-left:0}
+.bar .w{position:absolute;top:10px;height:2px;background:var(--fg);opacity:.45}
+.bar .mk{position:absolute;top:2px;width:4px;height:18px;margin-left:-2px;border-radius:2px;background:var(--fg)}
+.bar .mk.c-pass{background:var(--ok)}.bar .mk.c-warn{background:var(--warn)}.bar .mk.c-fail{background:var(--bad)}
+.gauge .gf{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;font-size:11px;color:var(--muted);font-family:var(--f-mono)}
+
+/* warnings */
+.warns{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.warns li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:8px 10px;border-radius:6px;background:var(--surface-2)}
+.warns .t{font-weight:600}
+.warns .d{font-size:12px;color:var(--muted)}
+.empty{padding:14px;border:1px dashed var(--line);border-radius:6px;color:var(--muted);font-size:13px;text-align:center}
+
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.chartbox{position:relative;height:320px}
+.chartbox.sm{height:280px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;white-space:nowrap}
+td.n,th.n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tscroll{overflow-x:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{font-size:12px;padding:2px 8px;border-radius:5px;background:var(--surface-2)}
+.chip b{font-family:var(--f-mono);font-weight:600}
+
+/* optimizer */
+.opt-sum{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:10px}
+.opt-sum .big{font-family:var(--f-mono);font-size:20px;font-weight:600}
+.arrow{color:var(--muted);margin:0 6px}
+
+/* relation matrix */
+.mx td,.mx th{text-align:center;padding:5px 6px;font-size:12px}
+.mx td:first-child,.mx th:first-child{text-align:left;white-space:nowrap}
+.mx .grp td{background:var(--surface-2);font-weight:700;font-size:11px;color:var(--muted);text-align:left}
+.mx .cell{font-family:var(--f-mono);font-weight:700;border-radius:4px;display:inline-block;min-width:30px;padding:1px 4px}
+.mx .up-bad,.mx .dn-bad{color:var(--bad);background:var(--bad-soft)}
+.mx .up-good,.mx .dn-good{color:var(--ok);background:var(--ok-soft)}
+.mx .neu{color:var(--accent);background:var(--accent-soft)}
+.mx .none{color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:8px}
+
+/* history */
+.save-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.save-row input{flex:1 1 220px;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.ftabs{display:inline-flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:7px}
+.ftabs button{border:0;background:transparent;padding:4px 10px;border-radius:5px;font-size:12px;font-weight:600;color:var(--muted)}
+.ftabs button[aria-selected="true"]{background:var(--surface);color:var(--fg)}
+.hist td .acts{display:flex;gap:4px;justify-content:flex-end}
+
+/* model */
+.csv-head{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
+.csv-head code{flex:1;min-width:0;display:block;overflow-x:auto;white-space:nowrap;padding:6px 8px;background:var(--surface-2);border-radius:5px;font-family:var(--f-mono);font-size:11px}
+.drop{border:1px dashed var(--line);border-radius:7px;padding:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.stat{display:flex;flex-wrap:wrap;gap:18px;margin:10px 0}
+.stat div{display:flex;flex-direction:column}
+.stat b{font-family:var(--f-mono);font-size:18px}
+details summary{cursor:pointer;font-size:12px;color:var(--accent);margin-top:8px}
+.keys{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 12px;font-size:12px;margin-top:6px}
+.keys code{font-family:var(--f-mono);color:var(--accent)}
+footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px;z-index:20;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+
+/* sets */
+.btnrow{display:flex;gap:6px;flex-wrap:wrap}
+tr.cur td{background:var(--accent-soft)}
+.stage{border:2px solid var(--accent);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:var(--accent-soft)}
+.stage .sh{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;margin-bottom:8px}
+.stage table{background:var(--surface);border-radius:6px}
+.sets td:nth-child(2){min-width:180px}
+
+/* decision */
+.dec-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px}
+h3{font-size:13px;font-weight:700;margin:14px 0 8px}
+.rec{border:1px solid var(--line);border-radius:7px;padding:12px 14px;background:var(--surface-2)}
+.rec-h{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.rec-act{font-size:24px;font-weight:700}
+.rec p{margin:6px 0 0;font-size:13px}
+.ev{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px}
+.ev > li{padding-left:2px}
+.ev .et{font-weight:700;font-size:13px}
+.ev ul{margin:4px 0 0;padding-left:16px;font-size:12.5px;color:var(--muted)}
+.ev ul li b{color:var(--fg);font-weight:600}
+.drv{display:grid;grid-template-columns:minmax(0,1fr) 90px auto;gap:4px 8px;align-items:center;font-size:12.5px;margin-top:4px}
+.drv .bx{height:8px;border-radius:4px;background:var(--track);overflow:hidden}
+.drv .bx i{display:block;height:100%;background:var(--bad)}
+.acts3{display:flex;flex-direction:column;gap:8px}
+.act{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center}
+.act.rec-on{border-width:2px}
+.act.k-stop.rec-on{border-color:var(--bad)}.act.k-part.rec-on{border-color:var(--warn)}.act.k-run.rec-on{border-color:var(--ok)}
+.act .at{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-weight:700;font-size:16px}
+.act .ad{grid-column:1/-1;font-size:12.5px;color:var(--muted)}
+.act .as{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;font-family:var(--f-mono);font-size:12.5px}
+.act .ab{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.btn.k-stop{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.k-part{background:var(--warn);border-color:var(--warn);color:#fff}
+.btn.k-run{background:var(--ok);border-color:var(--ok);color:#fff}
+:root[data-theme="dark"] .btn.k-stop,:root[data-theme="dark"] .btn.k-part,:root[data-theme="dark"] .btn.k-run{color:var(--bg)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.k-stop,:root:not([data-theme="light"]) .btn.k-part,:root:not([data-theme="light"]) .btn.k-run{color:var(--bg)}}
+.note-row{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.note-row input{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.stale{opacity:.55;transition:opacity .2s}
+
+/* economics */
+.econ-grid{display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:20px}
+.params{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:6px 8px;align-items:center;font-size:12.5px}
+.params .sec{grid-column:1/-1;font-weight:700;font-size:12px;color:var(--muted);margin-top:8px;letter-spacing:.03em}
+.params input{width:100%;text-align:right;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);font-family:var(--f-mono)}
+.econ td.best,.econ th.best{background:var(--ok-soft)}
+.econ tr.total td{font-weight:700;border-top:2px solid var(--fg)}
+.econ td:first-child{white-space:nowrap}
+
+@media (max-width:1080px){
+  .main{grid-template-columns:minmax(0,1fr)}
+  .dec-grid,.econ-grid{grid-template-columns:minmax(0,1fr)}
+  .rack{position:static}
+  .two{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:720px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .gauges{grid-template-columns:minmax(0,1fr)}
+  .kpi .val{font-size:24px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">엔진 크랭크샤프트 · 가공 조건 기반 품질 예측</div>
+      <h1>크랭크샤프트 품질 예측</h1>
+      <div class="route" aria-label="공정 흐름">
+        <span>단조 소재</span><i>›</i><span class="on">황삭 선삭/밀링</span><i>›</i><span>오일홀 드릴링</span><i>›</i>
+        <span class="on">고주파 유도경화</span><i>›</i><span class="on">저널·핀 연삭</span><i>›</i><span>슈퍼피니싱</span><i>›</i><span>밸런싱</span><i>›</i><span>최종 검사</span>
+      </div>
+    </div>
+    <div class="scen" role="group" aria-label="시나리오">
+      <span class="small muted">시나리오</span>
+      <button class="btn sm" data-scen="std" id="sc-std">표준 조건</button>
+      <button class="btn sm" data-scen="dull" id="sc-dull">숫돌 무뎌짐</button>
+      <button class="btn sm" data-scen="summer" id="sc-summer">여름철 고온</button>
+    </div>
+  </header>
+
+  <section class="kpis" aria-label="요약 지표">
+    <div class="kpi"><div class="lab">불량 확률 <span id="k1p" class="pill"></span></div><div class="val" id="k1"></div><div class="sub" id="k1s"></div></div>
+    <div class="kpi"><div class="lab">예상 Cpk (최저) <span id="k2p" class="pill"></span></div><div class="val" id="k2"></div><div class="sub" id="k2s"></div></div>
+    <div class="kpi"><div class="lab">합격 지표 <span id="k3p" class="pill"></span></div><div class="val" id="k3"></div><div class="sub" id="k3s"></div></div>
+    <div class="kpi"><div class="lab">위험 경고 <span id="k4p" class="pill"></span></div><div class="val" id="k4"></div><div class="sub" id="k4s"></div></div>
+  </section>
+
+  <section class="panel" aria-label="테스트 조건 세트">
+    <div class="panel-h"><h2>테스트 조건 세트</h2>
+      <div class="btnrow">
+        <label class="btn primary" for="setFile" style="cursor:pointer">엑셀·CSV 올리기</label>
+        <input type="file" id="setFile" accept=".xlsx,.xls,.csv" hidden>
+        <button class="btn" id="setSample" type="button">예시 10세트 불러오기</button>
+        <button class="btn ghost" id="setClear" type="button">목록 비우기</button></div></div>
+    <p class="small muted" id="setMsg" style="margin:0 0 8px">한 행 = 한 세트. 열 제목 끝 괄호 안 코드(ws, rpm …)로 열을 알아봅니다. 빈 칸은 기준값으로 채웁니다.</p>
+    <div class="stage" id="setStage" hidden></div>
+    <div class="tscroll"><table class="sets" id="sets"></table></div>
+  </section>
+
+  <div class="main">
+    <aside class="panel rack" aria-label="가공 조건 입력">
+      <div class="panel-h"><h2>가공·환경 조건</h2><span class="small muted" id="chgCount"></span></div>
+      <div class="tabs" role="tablist" id="gtabs"></div>
+      <div id="fixedNote" class="fixed-note"></div>
+      <div id="vars"></div>
+      <div class="rack-foot">
+        <button class="btn" id="resetAll">기준 조건으로 초기화</button>
+        <button class="btn ghost" id="resetTab">이 탭만 초기화</button>
+      </div>
+    </aside>
+
+    <div class="right">
+      <section class="panel" aria-label="품질 예측">
+        <div class="panel-h"><h2>예측 품질 지표</h2><span class="small muted">막대: 회색 = 표시 범위, 초록 = 규격, 선 = 95% 예측 구간</span></div>
+        <div class="gauges" id="gauges"></div>
+      </section>
+
+      <section class="panel" aria-label="경고">
+        <div class="panel-h"><h2>공정 경고</h2><span class="small muted">공정 지식 기반 규칙</span></div>
+        <ul class="warns" id="warns"></ul>
+      </section>
+
+      <section class="panel" aria-label="최적 조건 추천">
+        <div class="panel-h"><h2>최적 조건 추천</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" id="optRun">다시 계산</button><button class="btn primary" id="optApply">추천값 적용</button></div></div>
+        <div id="optBody"></div>
+      </section>
+
+      <div class="two">
+        <section class="panel" aria-label="민감도 분석">
+          <div class="panel-h"><h2>민감도 분석</h2>
+            <select id="sensTarget" aria-label="민감도 대상"></select></div>
+          <p class="small muted" style="margin:0 0 8px">각 조건을 범위의 ±10% 움직였을 때 대상 값의 변화. 막대가 길수록 먼저 관리할 변수입니다.</p>
+          <div class="chartbox"><canvas id="sensChart"></canvas></div>
+        </section>
+        <section class="panel" aria-label="What-if 비교">
+          <div class="panel-h"><h2>What-if 비교</h2><span class="small muted">기준 조건 대비</span></div>
+          <div class="tscroll"><table id="whatif"></table></div>
+          <div class="chips" id="diffChips"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel" id="decision" aria-label="관리자 판단">
+    <div class="panel-h"><h2>관리자 판단</h2><span class="small muted" id="decCtx"></span></div>
+    <div class="dec-grid" id="decBody">
+      <div>
+        <div class="rec" id="recBox"></div>
+        <h3>예측 근거</h3>
+        <ol class="ev" id="evList"></ol>
+      </div>
+      <div>
+        <h3 style="margin-top:0">조치 선택</h3>
+        <div class="acts3" id="acts3"></div>
+        <div class="note-row"><label for="decNote" class="small muted">판단 메모 (선택, 기록에 함께 남음)</label>
+          <input id="decNote" maxlength="120" placeholder="예: 14시 드레싱 실시 후 재가동, 품질팀 확인"></div>
+        <h3>판단 기록 <span class="small muted" id="decMode"></span></h3>
+        <div class="tscroll"><table id="decLog"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="경제성 분석">
+    <div class="panel-h"><h2>경제성 분석</h2><span class="small muted">분석 기간 동안의 예상 순이익 비교 · 값은 수정 가능</span></div>
+    <div class="econ-grid">
+      <form class="params" id="econForm" autocomplete="off"></form>
+      <div style="min-width:0">
+        <div class="tscroll"><table class="econ" id="econTable"></table></div>
+        <div class="chartbox sm" style="margin-top:12px"><canvas id="econChart"></canvas></div>
+        <p class="small muted" id="econNote" style="margin:8px 0 0"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="예측 이력">
+    <div class="panel-h"><h2>예측 이력</h2>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="small muted" id="storeMode"></span>
+      <div class="ftabs" role="tablist" id="hfilter">
+        <button role="tab" data-f="all" aria-selected="true">전체</button><button role="tab" data-f="pass">합격</button><button role="tab" data-f="fail">불합격</button></div></div></div>
+    <form class="save-row" id="saveForm">
+      <input id="saveName" placeholder="이름 (예: 2라인 야간조 연삭 조건)" maxlength="60" aria-label="저장 이름">
+      <button class="btn primary" type="submit">현재 예측 저장</button>
+    </form>
+    <div class="tscroll"><table class="hist" id="hist"></table></div>
+  </section>
+
+  <div class="two">
+    <section class="panel" aria-label="변수 영향 관계표">
+      <div class="panel-h"><h2>조건 → 품질 영향 관계표</h2><span class="small muted" id="mxSrc"></span></div>
+      <p class="small muted" style="margin:0 0 8px">조건 값을 올렸을 때 품질 지표가 움직이는 방향. 표준 조건에서 현재 모델로 계산합니다.</p>
+      <div class="tscroll"><table class="mx" id="mx"></table></div>
+      <div class="legend"><span><span class="cell up-bad" style="font-family:var(--f-mono);padding:0 4px;border-radius:4px">▲▲</span> 나빠짐(강)</span><span><span class="cell dn-good" style="font-family:var(--f-mono);padding:0 4px;border-radius:4px">▼</span> 좋아짐</span><span><span class="cell neu" style="font-family:var(--f-mono);padding:0 4px;border-radius:4px">▲</span> 양쪽 규격 지표(값 이동)</span><span>· 영향 작음</span></div>
+    </section>
+
+    <section class="panel" aria-label="예측 모델">
+      <div class="panel-h"><h2>예측 모델 · 데이터</h2><span class="pill" id="modelPill"></span></div>
+      <p class="small muted" style="margin:0" id="modelDesc"></p>
+      <div class="stat" id="modelStat"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <label for="validMetric" class="small muted">검증 지표</label><select id="validMetric"></select></div>
+      <div class="chartbox sm"><canvas id="validChart"></canvas></div>
+      <div class="drop" style="margin-top:12px">
+        <div><b>실측 데이터로 다시 학습</b><div class="small muted">엑셀 또는 CSV. 조건 열 + 측정 결과 열. 20건 이상 있는 지표만 다시 맞춥니다. 올린 데이터는 이 화면에서만 쓰고 저장하지 않습니다.</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <label class="btn primary" for="csvFile" style="cursor:pointer">엑셀·CSV 올리기</label>
+          <input type="file" id="csvFile" accept=".csv,.xlsx,.xls" hidden>
+          <button class="btn" id="resetModel">가상 데이터 모델로</button></div>
+      </div>
+      <div id="csvMsg" class="small" style="margin-top:8px"></div>
+      <div class="csv-head"><code id="csvHeader"></code><button class="btn sm" id="copyHead">복사</button></div>
+      <details><summary>열 이름 설명 보기</summary><div class="keys" id="keys"></div></details>
+    </section>
+  </div>
+
+  <footer>
+    <span>가상 데이터 기반 예측이며 실측 데이터로 검증이 필요합니다. 규격 값은 예시입니다.</span>
+    <span class="mono">모델: 2차 다중 회귀(교호작용 포함, 릿지) · 브라우저 내 계산</span>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script>
+(() => {
+"use strict";
+/* ───────── 정의: 입력 조건 ───────── */
+const GROUPS = [
+  {k:"grind", label:"연삭"}, {k:"heat", label:"유도경화"}, {k:"turn", label:"선삭/밀링"},
+  {k:"env", label:"환경"}, {k:"mat", label:"소재"}];
+const VARS = [
+  {k:"ws",    g:"grind", label:"숫돌 주속",          unit:"m/s",    min:30,  max:60,  step:1,    std:45,  ctrl:true},
+  {k:"rpm",   g:"grind", label:"공작물 회전수",      unit:"rpm",    min:40,  max:200, step:5,    std:100, ctrl:true},
+  {k:"feed",  g:"grind", label:"이송속도",           unit:"mm/min", min:0.5, max:6,   step:0.1,  std:2.5, ctrl:true},
+  {k:"depth", g:"grind", label:"절입량",             unit:"µm",     min:5,   max:40,  step:1,    std:15,  ctrl:true},
+  {k:"dress", g:"grind", label:"드레싱 후 가공 수량", unit:"개",     min:0,   max:60,  step:1,    std:15,  ctrl:true},
+  {k:"spark", g:"grind", label:"스파크아웃 시간",    unit:"s",      min:0,   max:6,   step:0.1,  std:3,   ctrl:true},
+  {k:"pw",    g:"heat",  label:"출력",               unit:"kW",     min:80,  max:200, step:1,    std:140, ctrl:true},
+  {k:"fr",    g:"heat",  label:"주파수",             unit:"kHz",    min:5,   max:30,  step:0.5,  std:10,  ctrl:true},
+  {k:"ht",    g:"heat",  label:"가열 시간",          unit:"s",      min:2,   max:10,  step:0.1,  std:5.5, ctrl:true},
+  {k:"qt",    g:"heat",  label:"냉각수 온도",        unit:"℃",      min:15,  max:45,  step:0.5,  std:25,  ctrl:true},
+  {k:"qc",    g:"heat",  label:"냉각수 농도",        unit:"%",      min:3,   max:15,  step:0.5,  std:8,   ctrl:true},
+  {k:"vc",    g:"turn",  label:"절삭속도",           unit:"m/min",  min:100, max:300, step:5,    std:200, ctrl:true},
+  {k:"tf",    g:"turn",  label:"이송",               unit:"mm/rev", min:0.1, max:0.6, step:0.01, std:0.3, ctrl:true},
+  {k:"td",    g:"turn",  label:"절삭깊이",           unit:"mm",     min:0.5, max:4,   step:0.1,  std:2,   ctrl:true},
+  {k:"tool",  g:"turn",  label:"공구 사용 시간",     unit:"min",    min:0,   max:120, step:1,    std:30,  ctrl:true},
+  {k:"amb",   g:"env",   label:"공장 온도",          unit:"℃",      min:10,  max:38,  step:0.5,  std:22,  ctrl:false},
+  {k:"hum",   g:"env",   label:"습도",               unit:"%",      min:30,  max:90,  step:1,    std:55,  ctrl:false},
+  {k:"ct",    g:"env",   label:"절삭유 온도",        unit:"℃",      min:15,  max:40,  step:0.5,  std:24,  ctrl:true},
+  {k:"cc",    g:"env",   label:"절삭유 농도",        unit:"%",      min:2,   max:10,  step:0.1,  std:5,   ctrl:true},
+  {k:"vib",   g:"env",   label:"설비 진동",          unit:"mm/s",   min:0.5, max:6,   step:0.1,  std:1.5, ctrl:false},
+  {k:"hd",    g:"mat",   label:"소재 경도 편차",     unit:"HB",     min:0,   max:40,  step:1,    std:10,  ctrl:false},
+  {k:"allow", g:"mat",   label:"단조 가공 여유",     unit:"mm",     min:1,   max:6,   step:0.1,  std:3,   ctrl:false}];
+const VI = Object.fromEntries(VARS.map((v,i)=>[v.k,i]));
+const STD = Object.fromEntries(VARS.map(v=>[v.k,v.std]));
+
+/* ───────── 정의: 품질 지표 ───────── */
+const METRICS = [
+  {k:"dia",    label:"메인저널 직경 편차", short:"직경",   unit:"µm",  lsl:-8,  usl:8,   dec:1, axis:[-16,16]},
+  {k:"round",  label:"진원도",             short:"진원도", unit:"µm",  lsl:null,usl:3,   dec:2, axis:[0,5]},
+  {k:"cyl",    label:"원통도",             short:"원통도", unit:"µm",  lsl:null,usl:5,   dec:2, axis:[0,8]},
+  {k:"ra",     label:"표면조도 Ra",        short:"Ra",     unit:"µm",  lsl:null,usl:0.2, dec:3, axis:[0,0.32]},
+  {k:"runout", label:"흔들림(런아웃)",     short:"런아웃", unit:"µm",  lsl:null,usl:20,  dec:1, axis:[0,32]},
+  {k:"hrc",    label:"표면 경도",          short:"경도",   unit:"HRC", lsl:52,  usl:60,  dec:1, axis:[48,64]},
+  {k:"case",   label:"유효 경화층 깊이",   short:"경화층", unit:"mm",  lsl:2,   usl:4,   dec:2, axis:[1,5]},
+  {k:"burn",   label:"연삭 버닝 위험",     short:"버닝",   unit:"%",   lsl:null,usl:30,  warn:15, dec:1, axis:[0,60], logit:true}];
+const MI = Object.fromEntries(METRICS.map(m=>[m.k,m]));
+
+const SCEN = {
+  std: {...STD},
+  dull: {...STD, dress:55, depth:25, feed:3.2, spark:2},
+  summer: {...STD, amb:35, hum:80, ct:36, qt:38, cc:4}};
+// 엑셀 예시 파일(크랭크샤프트_테스트조건_10세트.xlsx)과 같은 값
+const SAMPLE_SETS=[
+  ["S01","표준 조건 (정상 가동)",{}],
+  ["S02","숫돌 무뎌짐 (드레싱 주기 초과)",{dress:55,depth:25,feed:3.2,spark:2}],
+  ["S03","여름철 고온 (오후 2시)",{amb:35,hum:80,ct:36,qt:38,cc:4}],
+  ["S04","겨울철 아침 기동 (워밍업 부족)",{amb:12,hum:35,ct:17,qt:18,vib:2.2}],
+  ["S05","담금질 냉각수 온도 상승",{qt:37,qc:11}],
+  ["S06","생산량 증대 (이송·절입 상향)",{feed:4.5,depth:24,spark:1.2,tf:0.45,vc:260,tool:70}],
+  ["S07","설비 진동 증가 (스핀들 이상 징후)",{vib:4.6,dress:30}],
+  ["S08","유도경화 입열 부족",{pw:96,ht:3.2,fr:18}],
+  ["S09","소재 로트 편차 (단조 여유 과다)",{hd:30,allow:5.3,tool:95}],
+  ["S10","개선 조건 (드레싱 단축·절삭유 관리)",{dress:8,depth:11,feed:1.8,spark:3.5,cc:6.5,ct:21}]
+].map(([id,name,d])=>({id,name,x:{...STD,...d}}));
+
+/* 경제성 가정값 (수정 가능) */
+const ECON=[
+  {sec:"생산"},
+  {k:"hours",label:"분석 기간 (1교대)",unit:"h",def:8,step:0.5},
+  {k:"rate",label:"시간당 생산량",unit:"개/h",def:60,step:1},
+  {k:"price",label:"판매 단가",unit:"원",def:120000,step:1000},
+  {k:"cost",label:"변동원가 (재료+가공)",unit:"원",def:85000,step:1000},
+  {sec:"불량"},
+  {k:"claim",label:"유출 불량 1개당 클레임 비용",unit:"원",def:1000000,step:10000},
+  {k:"det",label:"일반 검사 검출률",unit:"%",def:95,step:0.5},
+  {sec:"정지"},
+  {k:"stopH",label:"정지 시간 (점검·조치·재가동)",unit:"h",def:2,step:0.25},
+  {k:"stopCost",label:"정지 조치 비용 (인건비·부품)",unit:"원",def:600000,step:10000},
+  {sec:"부분조치"},
+  {k:"partH",label:"조정 시간",unit:"h",def:0.5,step:0.25},
+  {k:"partCost",label:"조정 비용",unit:"원",def:200000,step:10000},
+  {k:"partDet",label:"전수검사 검출률",unit:"%",def:99,step:0.5},
+  {k:"inspCost",label:"전수검사 추가 비용",unit:"원/개",def:2000,step:100}];
+const ACT={stop:{label:"정지",cls:"fail"},part:{label:"부분조치",cls:"warn"},run:{label:"계속작동",cls:"pass"}};
+
+/* ───────── 가상 공정(정답 함수): 공정 지식 기반 관계 + 잡음 ───────── */
+function mulberry(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+function truth(x, r){
+  const n=()=>gauss(r);
+  return {
+    dia: 0.45*(x.amb-22)+0.25*(x.ct-24)+0.07*(x.dress-15)+0.06*(x.depth-15)-0.55*(x.spark-3)+0.01*(x.hum-55)+1.6*n(),
+    round: Math.max(0.2, 1.2+0.035*(x.depth-15)+0.022*x.dress+0.28*(x.vib-1.5)+0.10*(x.feed-2.5)-0.10*(x.spark-3)
+      +0.0012*(x.depth-15)*(x.dress-15)+0.008*x.hd+0.003*(x.rpm-100)+0.28*n()),
+    cyl: Math.max(0.3, 2.0+0.04*(x.depth-15)+0.025*x.dress+0.35*(x.vib-1.5)+0.09*Math.abs(x.amb-22)+0.12*(x.allow-3)
+      +0.12*(x.feed-2.5)-0.10*(x.spark-3)+0.4*n()),
+    ra: Math.max(0.03, 0.095+0.0018*(x.depth-15)+0.0016*x.dress+0.014*(x.feed-2.5)-0.0016*(x.ws-45)-0.006*(x.spark-3)
+      +0.012*(x.vib-1.5)-0.004*(x.cc-5)+0.0015*(x.ct-24)+0.0002*(x.hum-55)-0.0002*(x.rpm-100)+0.014*n()),
+    runout: Math.max(1, 9+1.6*(x.allow-3)+0.09*x.hd+1.4*(x.vib-1.5)+0.035*(x.tool-30)+7*(x.tf-0.3)+0.35*(x.ht-5.5)
+      +0.02*(x.pw-140)+0.3*(x.td-2)-0.006*(x.vc-200)+1.8*n()),
+    hrc: 56.5+0.035*(x.pw-140)-0.0006*(x.pw-140)**2+0.3*(x.ht-5.5)-0.03*(x.ht-5.5)**2-0.13*(x.qt-25)-0.12*(x.qc-8)
+      +0.02*(x.hd-10)+0.7*n(),
+    case: 3.0+0.011*(x.pw-140)+0.2*(x.ht-5.5)-0.035*(x.fr-10)-0.008*(x.qt-25)+0.001*(x.pw-140)*(x.ht-5.5)+0.14*n(),
+    burn: -3.4+0.07*(x.depth-15)+0.045*(x.dress-15)+0.035*(x.ws-45)+0.07*(x.ct-24)-0.22*(x.cc-5)
+      +0.0025*(x.depth-15)*(x.dress-15)+0.35*(x.feed-2.5)-0.05*(x.spark-3)+0.25*n() // logit
+  };
+}
+function sampleX(r){
+  const x={};
+  VARS.forEach(v=>{
+    const span=v.max-v.min;
+    let val = r()<0.7 ? v.std+gauss(r)*span/6 : v.min+r()*span;
+    x[v.k]=Math.min(v.max,Math.max(v.min,val));
+  });
+  return x;
+}
+
+/* ───────── 예측 모델: 2차항 + 교호작용 릿지 회귀 ───────── */
+const INTER=[["depth","dress"],["pw","ht"],["amb","ct"],["feed","depth"],["vib","depth"],["dress","feed"]];
+function feats(x){
+  const z=VARS.map(v=>(x[v.k]-v.std)/((v.max-v.min)/4));
+  const f=[1,...z,...z.map(a=>a*a)];
+  INTER.forEach(([a,b])=>f.push(z[VI[a]]*z[VI[b]]));
+  return f;
+}
+function solve(A,b){
+  const n=b.length, M=A.map((row,i)=>[...row,b[i]]);
+  for(let c=0;c<n;c++){
+    let p=c; for(let r=c+1;r<n;r++) if(Math.abs(M[r][c])>Math.abs(M[p][c])) p=r;
+    [M[c],M[p]]=[M[p],M[c]];
+    const d=M[c][c]||1e-12;
+    for(let r=c+1;r<n;r++){const k=M[r][c]/d; if(k) for(let j=c;j<=n;j++) M[r][j]-=k*M[c][j];}
+  }
+  const w=new Array(n).fill(0);
+  for(let r=n-1;r>=0;r--){let s=M[r][n]; for(let j=r+1;j<n;j++) s-=M[r][j]*w[j]; w[r]=s/(M[r][r]||1e-12);}
+  return w;
+}
+function fitRidge(F,y,lambda){
+  const p=F[0].length, A=Array.from({length:p},()=>new Array(p).fill(0)), b=new Array(p).fill(0);
+  F.forEach((f,i)=>{for(let a=0;a<p;a++){b[a]+=f[a]*y[i]; const fa=f[a]; if(fa) for(let c=a;c<p;c++) A[a][c]+=fa*f[c];}});
+  for(let a=0;a<p;a++){for(let c=0;c<a;c++) A[a][c]=A[c][a]; if(a>0) A[a][a]+=lambda;}
+  return solve(A,b);
+}
+const dot=(w,f)=>{let s=0;for(let i=0;i<w.length;i++) s+=w[i]*f[i];return s};
+const sig=t=>1/(1+Math.exp(-t));
+const logit=p=>{p=Math.min(0.995,Math.max(0.005,p));return Math.log(p/(1-p))};
+
+function trainMetric(rows, key){ // rows: [{x, y:{...}}] y in model space
+  const data=rows.filter(r=>Number.isFinite(r.y[key]));
+  const n=data.length, holdout=n>=40;
+  const cut=holdout?Math.floor(n*0.8):n;
+  const tr=data.slice(0,cut), te=holdout?data.slice(cut):data;
+  const F=tr.map(r=>feats(r.x)), y=tr.map(r=>r.y[key]);
+  const coef=fitRidge(F,y,Math.max(1,tr.length*0.002));
+  const res=tr.map((r,i)=>y[i]-dot(coef,F[i]));
+  const p=coef.length, dof=Math.max(1,tr.length-Math.min(p,tr.length-1));
+  const sigma=Math.sqrt(res.reduce((s,e)=>s+e*e,0)/dof);
+  const m=MI[key], toVal=v=>m.logit?100*sig(v):v;
+  const pred=te.map(r=>toVal(dot(coef,feats(r.x)))), act=te.map(r=>toVal(r.y[key]));
+  const mean=act.reduce((s,v)=>s+v,0)/act.length;
+  const sse=act.reduce((s,v,i)=>s+(v-pred[i])**2,0), sst=act.reduce((s,v)=>s+(v-mean)**2,0);
+  return {coef, sigma, valid:{pred,act,holdout,n:te.length}, r2:1-sse/(sst||1), rmse:Math.sqrt(sse/act.length), n};
+}
+
+let SYN=null;
+function syntheticRows(){
+  if(SYN) return SYN;
+  const r=mulberry(20261101); SYN=[];
+  for(let i=0;i<800;i++){const x=sampleX(r); SYN.push({x,y:truth(x,r)});}
+  return SYN;
+}
+let model={by:{}, source:{}, csvRows:0};
+let modelVer=0;
+function trainSynthetic(){
+  modelVer++;
+  const rows=syntheticRows();
+  METRICS.forEach(m=>{model.by[m.k]=trainMetric(rows,m.k); model.source[m.k]="synthetic";});
+  model.csvRows=0;
+}
+
+/* ───────── 예측 · 판정 ───────── */
+function erf(x){const t=1/(1+0.3275911*Math.abs(x));const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);return x>=0?y:-y}
+const Phi=z=>0.5*(1+erf(z/Math.SQRT2));
+function predict(x){
+  const f=feats(x), out={};
+  METRICS.forEach(m=>{
+    const {coef,sigma}=model.by[m.k], mu=dot(coef,f);
+    if(m.logit) out[m.k]={v:100*sig(mu),lo:100*sig(mu-1.96*sigma),hi:100*sig(mu+1.96*sigma),sd:sigma};
+    else{
+      const floor=m.lsl==null?0:-Infinity, v=Math.max(floor,mu);
+      out[m.k]={v,lo:Math.max(floor,mu-1.96*sigma),hi:mu+1.96*sigma,sd:sigma};
+    }
+  });
+  return out;
+}
+function evaluate(x){
+  const P=predict(x), res={pred:P, m:{}};
+  let keep=1, cpkMin=Infinity, cpkKey=null, pass=0;
+  METRICS.forEach(m=>{
+    const {v,sd}=P[m.k]; let p, status, cpk=null;
+    if(m.logit){
+      p=v/100; status=v>m.usl?"fail":v>=m.warn?"warn":"pass";
+    }else{
+      p=(m.lsl!=null?Phi((m.lsl-v)/sd):0)+(1-Phi((m.usl-v)/sd));
+      const cu=(m.usl-v)/(3*sd), cl=m.lsl!=null?(v-m.lsl)/(3*sd):Infinity;
+      cpk=Math.min(cu,cl);
+      const out=v>m.usl||(m.lsl!=null&&v<m.lsl);
+      status=out?"fail":(p>=0.05||cpk<1.0)?"warn":"pass";
+      if(cpk<cpkMin){cpkMin=cpk;cpkKey=m.k;}
+    }
+    keep*=1-Math.min(1,Math.max(0,p));
+    if(status==="pass") pass++;
+    res.m[m.k]={p,status,cpk};
+  });
+  res.defect=1-keep; res.cpk=cpkMin; res.cpkKey=cpkKey; res.pass=pass;
+  res.ok=METRICS.every(m=>res.m[m.k].status!=="fail");
+  return res;
+}
+
+/* ───────── 경고 규칙 ───────── */
+function warnings(x){
+  const W=[];
+  const add=(lv,t,d)=>W.push({lv,t,d});
+  if(x.dress>=40&&x.depth>=20) add("fail","드레싱 주기 초과 + 큰 절입량",`드레싱 후 ${x.dress}개 가공, 절입 ${x.depth}µm. 연삭 버닝과 진원도 악화 위험이 큽니다. 드레싱을 실시하거나 절입량을 15µm 이하로 낮추세요.`);
+  else if(x.dress>=45) add("warn","숫돌 무뎌짐",`드레싱 후 ${x.dress}개 가공. 조도와 진원도가 나빠지기 시작하는 구간입니다. 드레싱 주기를 30개 이하로 관리하세요.`);
+  if(x.qt>=32) add(x.qt>=38?"fail":"warn","담금질 냉각수 온도 높음",`냉각수 ${x.qt}℃. 냉각 속도가 떨어져 표면 경도가 부족해질 수 있습니다. 칠러 점검, 25℃ 전후로 관리하세요.`);
+  if(Math.abs(x.amb-22)>=6) add(Math.abs(x.amb-22)>=10?"fail":"warn","공장 온도 편차 큼",`공장 ${x.amb}℃ (기준 22℃). 기계·공작물 열변위로 저널 직경이 흔들립니다. 워밍업 후 측정 보정, 온도 보정값 재설정을 권장합니다.`);
+  if(x.ct>=30) add("warn","절삭유 온도 높음",`절삭유 ${x.ct}℃. 연삭열이 빠지지 않아 버닝과 직경 편차가 커집니다.`);
+  if(x.cc<3.5) add("warn","절삭유 농도 낮음",`농도 ${x.cc}%. 윤활 부족으로 연삭 버닝 위험이 오릅니다. 4~6%로 보충하세요.`);
+  if(x.vib>=3.5) add(x.vib>=4.5?"fail":"warn","설비 진동 큼",`진동 ${x.vib}mm/s. 진원도·원통도·런아웃이 함께 나빠집니다. 숫돌 밸런싱, 스핀들 베어링을 점검하세요.`);
+  if(x.spark<1.5) add("warn","스파크아웃 부족",`스파크아웃 ${x.spark}s. 탄성 변형이 다 빠지지 않아 직경·형상 오차가 남습니다.`);
+  if(x.tool>=90) add("warn","선삭 공구 수명 임박",`공구 사용 ${x.tool}분. 황삭 형상이 흔들려 런아웃이 커질 수 있습니다.`);
+  if(x.pw>=185&&x.ht>=8) add("warn","유도가열 과열",`출력 ${x.pw}kW, 가열 ${x.ht}s. 경화층이 깊어지고 열변형으로 런아웃이 커질 수 있습니다.`);
+  if(x.ht<=3.5||x.pw<=100) add("warn","경화 입열 부족",`출력 ${x.pw}kW, 가열 ${x.ht}s. 유효 경화층 깊이가 하한(2.0mm)에 가까워집니다.`);
+  if(x.hd>=25) add("warn","소재 경도 편차 큼",`편차 ${x.hd}HB. 단조 로트 확인, 입고 검사 강화가 필요합니다.`);
+  if(x.allow>=5) add("warn","단조 가공 여유 과다",`여유 ${x.allow}mm. 황삭 부하가 커져 런아웃이 증가합니다.`);
+  const rank={fail:0,warn:1};
+  return W.sort((a,b)=>rank[a.lv]-rank[b.lv]);
+}
+
+/* ───────── 최적 조건 탐색 ───────── */
+function optimize(x0){
+  const C=VARS.filter(v=>v.ctrl);
+  // 생산량 1% 감소 ≈ 불량 0.2%p 손실로 환산 (개당 공헌이익 대비 불량 1개 손실 비율)
+  const cost=x=>evaluate(x).defect+0.2*Math.max(0,1-rateFactor(x))+0.01*C.reduce((s,v)=>s+Math.abs(x[v.k]-x0[v.k])/(v.max-v.min),0);
+  // 생산성·설비 한계를 고려해 기준값 ±30% 범위(실무 공정 창) 안에서만 찾는다
+  const win=v=>{const h=(v.max-v.min)*0.3;return [Math.max(v.min,v.std-h),Math.min(v.max,v.std+h)]};
+  let x={...x0}, best=cost(x);
+  for(let round=0;round<6;round++){
+    let improved=false;
+    C.forEach(v=>{
+      let bestVal=x[v.k]; const [a,b]=win(v);
+      for(let i=0;i<=12;i++){
+        x[v.k]=snap(v,a+(b-a)*i/12); const c=cost(x);
+        if(c<best-1e-6){best=c;bestVal=x[v.k];improved=true;}
+      }
+      x[v.k]=bestVal;
+    });
+    if(!improved) break;
+  }
+  const ev=evaluate(x), base=evaluate(x0);
+  const changes=C.filter(v=>Math.abs(x[v.k]-x0[v.k])>=v.step*0.99).map(v=>{
+    // 추천 범위: 불량 확률이 최적 +0.5%p 이내로 유지되는 연속 구간
+    const lim=ev.defect+0.005, pts=[], [a,b]=win(v);
+    for(let i=0;i<=24;i++){const val=snap(v,a+(b-a)*i/24); const t={...x,[v.k]:val}; pts.push([val,evaluate(t).defect<=lim]);}
+    let lo=x[v.k], hi=x[v.k];
+    const sorted=pts.sort((a,b)=>a[0]-b[0]);
+    let idx=sorted.findIndex(p=>p[0]>=x[v.k]); if(idx<0) idx=sorted.length-1;
+    for(let i=idx;i>=0&&sorted[i][1];i--) lo=Math.min(lo,sorted[i][0]);
+    for(let i=idx;i<sorted.length&&sorted[i][1];i++) hi=Math.max(hi,sorted[i][0]);
+    return {v, from:x0[v.k], to:x[v.k], lo, hi, w:Math.abs(x[v.k]-x0[v.k])/(v.max-v.min)};
+  }).sort((a,b)=>b.w-a.w);
+  return {x, ev, base, changes};
+}
+/* ───────── 조치안(정지·부분조치·계속작동) · 경제성 · 권장 판단 ───────── */
+function plans(x, opt){
+  const ev=evaluate(x);
+  opt=opt||optimize(x);
+  // 정지: 설비 점검으로 진동을 기준까지 복구한 뒤 설정 조건을 모두 최적화
+  const maint=[]; let optS=opt;
+  if(x.vib>STD.vib){maint.push(`설비 진동 ${x.vib}→${STD.vib}mm/s 복구 (스핀들·숫돌 밸런싱 점검)`); optS=optimize({...x,vib:STD.vib});}
+  // 부분조치: 운전 중 바로 바꿀 수 있는 효과 큰 조건 2개만 조정
+  let px={...x}; const picked=[];
+  for(let k=0;k<2;k++){
+    let best=null;
+    const sc=y=>evaluate(y).defect+0.2*Math.max(0,1-rateFactor(y));
+    const cur=sc(px);
+    opt.changes.forEach(c=>{if(picked.includes(c))return; const d=sc({...px,[c.v.k]:c.to}); if(!best||d<best.d) best={c,d};});
+    if(best&&best.d<cur-1e-4){px[best.c.v.k]=best.c.to; picked.push(best.c);} else break;
+  }
+  return {x, ev, opt, stop:{x:optS.x, ev:evaluate(optS.x), maint, changes:optS.changes}, part:{x:px, ev:evaluate(px), changes:picked}};
+}
+// 시간당 생산량 배율: 연삭 이송이 느리거나 스파크아웃이 길거나 드레싱을 자주 하면 사이클 타임이 늘어난다 (기준 = 1)
+function rateFactor(x){
+  const f=Math.pow(x.feed/STD.feed,0.4)*((60+STD.spark)/(60+x.spark))*((1+0.4/STD.dress)/(1+0.4/Math.max(1,x.dress)));
+  return Math.min(1.3,Math.max(0.5,f));
+}
+function econParams(){
+  const saved=LS.get("ckq-econ",{}), P={};
+  ECON.forEach(e=>{if(e.k){const n=+saved[e.k]; P[e.k]=Number.isFinite(n)&&n>=0?n:e.def;}});
+  return P;
+}
+function econ(pl,P){
+  const one=(hDown,p,det,fixed,insp,x)=>{
+    const rf=rateFactor(x), T=Math.max(0,P.hours-hDown), N=P.rate*rf*T, D=N*p, Dd=D*Math.min(1,det), De=D-Dd;
+    const contrib=(N-Dd)*(P.price-P.cost), scrap=Dd*P.cost, claim=De*P.claim, act=fixed+N*insp;
+    return {T,rf,N,p,D,Dd,De,contrib,scrap,claim,act,net:contrib-scrap-claim-act};
+  };
+  return {
+    stop:one(P.stopH,pl.stop.ev.defect,P.det/100,P.stopCost,0,pl.stop.x),
+    part:one(P.partH,pl.part.ev.defect,P.partDet/100,P.partCost,P.inspCost,pl.part.x),
+    run: one(0,pl.ev.defect,P.det/100,0,0,pl.x)};
+}
+function recommend(pl,E,x){
+  const ev=pl.ev, rules=[], K=["stop","part","run"];
+  const econBest=K.reduce((a,b)=>E[b].net>E[a].net?b:a);
+  const fails=METRICS.filter(m=>ev.m[m.k].status==="fail");
+  if(ev.m.burn.status==="fail") rules.push(`연삭 버닝 위험 ${fmt(ev.pred.burn.v,1)}% > 30% → 버닝품은 피로강도가 떨어지고 외관 검사로 다 걸러내기 어려워 즉시 정지`);
+  if(x.vib>=4.5) rules.push(`설비 진동 ${x.vib}mm/s ≥ 4.5 → 스핀들·베어링 손상 위험, 즉시 정지`);
+  if(rules.length) return {choice:"stop",forced:true,econBest,rules,allowed:["stop"],
+    why:"품질·설비 안전 규칙에 걸려 경제성과 관계없이 정지를 권장합니다."};
+  const allowed=["stop","part"];
+  if(!fails.length&&ev.defect<0.10){allowed.push("run");rules.push("불합격 지표 없음, 불량 확률 10% 미만 → 계속작동 허용");}
+  else rules.push(fails.length?`불합격 지표(${fails.map(m=>m.short).join(", ")})가 있어 알고도 생산하는 계속작동은 제외`:`불량 확률 ${pct(ev.defect)}% ≥ 10% → 계속작동 제외`);
+  const choice=allowed.reduce((a,b)=>E[b].net>E[a].net?b:a);
+  rules.push(`허용된 조치 중 예상 순이익이 가장 큰 안 → ${ACT[choice].label}`);
+  return {choice,forced:false,econBest,rules,allowed,
+    why:`허용된 조치 중 ${ACT[choice].label}의 예상 순이익(${man(E[choice].net)})이 가장 큽니다.`};
+}
+function drivers(x){
+  const d0=evaluate(x).defect;
+  return VARS.filter(v=>x[v.k]!==v.std).map(v=>({v,to:x[v.k],d:d0-evaluate({...x,[v.k]:v.std}).defect}))
+    .filter(r=>r.d>0.0005).sort((a,b)=>b.d-a.d).slice(0,5);
+}
+function man(v){const m=Math.round(v/10000);return (m<0?"−":"")+Math.abs(m).toLocaleString("ko-KR")+"만원"}
+function snap(v,val){const s=Math.round((val-v.min)/v.step)*v.step+v.min; return +Math.min(v.max,Math.max(v.min,s)).toFixed(4)}
+
+/* ───────── 상태 ───────── */
+const LS={get(k,d){try{const s=localStorage.getItem(k);return s?JSON.parse(s):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const state={
+  x:{...STD,...LS.get("ckq-x",{})},
+  tab:LS.get("ckq-tab","grind"),
+  hfilter:"all",
+  sensTarget:"defect",
+  validMetric:"round",
+  opt:null, optFor:null, plan:null,
+  ctx:LS.get("ckq-ctx",null),
+  sets:LS.get("ckq-sets",[]).filter(s=>s&&s.x).map(s=>({id:String(s.id||""),name:String(s.name||""),x:{...STD,...s.x}}))
+};
+VARS.forEach(v=>{const n=+state.x[v.k]; state.x[v.k]=Number.isFinite(n)?Math.min(v.max,Math.max(v.min,n)):v.std;});
+
+/* ───────── 표시 도우미 ───────── */
+const $=id=>document.getElementById(id);
+const fmt=(v,d)=>Number.isFinite(v)?v.toFixed(d):"–";
+const pct=(p,d=1)=>(p*100).toFixed(d);
+const ST={pass:"합격",warn:"주의",fail:"불합격"};
+const pill=(el,s,txt)=>{el.className="pill s-"+s; el.textContent=txt||ST[s];};
+const decOf=v=>v.step<0.1?2:v.step<1?1:0;
+const specText=m=>m.logit?`≤ ${m.usl}% (주의 ${m.warn}%)`:m.lsl!=null&&m.usl!=null?(m.lsl===-m.usl?`±${m.usl} ${m.unit}`:`${m.lsl}~${m.usl} ${m.unit}`):`≤ ${m.usl} ${m.unit}`;
+function el(tag,attrs={},...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k==="class")e.className=v;else if(k==="text")e.textContent=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else e.setAttribute(k,v);}kids.flat().forEach(c=>c!=null&&e.append(c));return e}
+let toastT; function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),2200)}
+const tok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ───────── 조건 입력 랙 ───────── */
+function buildTabs(){
+  const t=$("gtabs"); t.innerHTML="";
+  GROUPS.forEach(g=>{
+    const b=el("button",{role:"tab",id:"tab-"+g.k,"aria-selected":String(state.tab===g.k),onclick:()=>{state.tab=g.k;LS.set("ckq-tab",g.k);buildTabs();buildVars();}},g.label);
+    const n=VARS.filter(v=>v.g===g.k&&state.x[v.k]!==v.std).length;
+    if(n) b.append(el("span",{class:"badge",text:String(n)}));
+    t.append(b);
+  });
+  const fixed=VARS.filter(v=>v.g===state.tab&&!v.ctrl).map(v=>v.label);
+  $("fixedNote").textContent=fixed.length?`현장 상태 변수(추천 시 고정): ${fixed.join(", ")}`:"";
+  const total=VARS.filter(v=>state.x[v.k]!==v.std).length;
+  $("chgCount").textContent=total?`기준 대비 ${total}개 변경`:"기준 조건";
+}
+function buildVars(){
+  const box=$("vars"); box.innerHTML="";
+  VARS.filter(v=>v.g===state.tab).forEach(v=>{
+    const d=decOf(v);
+    const num=el("input",{type:"number",id:"n-"+v.k,min:v.min,max:v.max,step:v.step,value:state.x[v.k],"aria-label":v.label+" ("+v.unit+")"});
+    const rng=el("input",{type:"range",id:"r-"+v.k,min:v.min,max:v.max,step:v.step,value:state.x[v.k],"aria-label":v.label});
+    const row=el("div",{class:"var"+(state.x[v.k]!==v.std?" changed":""),id:"row-"+v.k},
+      el("label",{for:"n-"+v.k,text:v.label}),
+      el("div",{class:"nbox"},num,el("span",{class:"unit",text:v.unit})),
+      rng,
+      el("div",{class:"ref"},el("span",{text:fmt(v.min,d)}),el("span",{text:"기준 "+fmt(v.std,d)}),el("span",{text:fmt(v.max,d)})));
+    const set=(val,from)=>{
+      let n=parseFloat(val); if(!Number.isFinite(n)) return;
+      n=Math.min(v.max,Math.max(v.min,n)); n=+n.toFixed(4);
+      state.x[v.k]=n;
+      if(from!=="n") num.value=n; if(from!=="r") rng.value=n;
+      row.classList.toggle("changed",n!==v.std);
+      if(state.ctx&&!state.ctx.manual){state.ctx={...state.ctx,manual:true};LS.set("ckq-ctx",state.ctx);renderSets();}
+      scheduleRender();
+    };
+    rng.addEventListener("input",()=>set(rng.value,"r"));
+    num.addEventListener("input",()=>set(num.value,"n"));
+    num.addEventListener("change",()=>{set(num.value);num.value=state.x[v.k];});
+    box.append(row);
+  });
+}
+function applyX(x,ctx=null){state.x={...x}; state.ctx=ctx; LS.set("ckq-ctx",ctx); buildTabs(); buildVars(); renderAll(); renderSets();}
+const ctxLabel=()=>state.ctx?`${state.ctx.id} ${state.ctx.name}${state.ctx.manual?" (수동 조정됨)":""}`:"현재 화면 조건 (수동 입력)";
+
+/* ───────── 렌더 ───────── */
+let raf=0, optTimer=0;
+function scheduleRender(){ if(raf) return; raf=requestAnimationFrame(()=>{raf=0;renderAll();}); }
+function renderAll(){
+  LS.set("ckq-x",state.x);
+  buildTabs();
+  const ev=evaluate(state.x), base=evaluate(STD), W=warnings(state.x);
+  renderKpis(ev,base,W); renderGauges(ev); renderWarns(W); renderWhatif(ev,base); renderSens();
+  clearTimeout(optTimer); optTimer=setTimeout(runOpt,350);
+  if(state.opt && JSON.stringify(state.optFor)!==JSON.stringify(state.x)){$("optBody").style.opacity=".55";$("decBody").classList.add("stale");}
+}
+function renderKpis(ev,base,W){
+  const d=ev.defect, ds=d<0.02?"pass":d<0.10?"warn":"fail";
+  $("k1").innerHTML=`${pct(d)}<small>%</small>`; pill($("k1p"),ds);
+  const dd=(d-base.defect)*100;
+  $("k1s").textContent=`기준 조건 ${pct(base.defect)}% · ${dd>=0?"+":""}${dd.toFixed(1)}%p`;
+  const c=ev.cpk, cs=c>=1.33?"pass":c>=1.0?"warn":"fail";
+  $("k2").textContent=fmt(c,2); pill($("k2p"),cs, c>=1.33?"충분":c>=1.0?"관리 필요":"부족");
+  $("k2s").textContent=`가장 낮은 지표: ${MI[ev.cpkKey].label} · 목표 1.33 이상`;
+  const fails=METRICS.filter(m=>ev.m[m.k].status==="fail"), warns=METRICS.filter(m=>ev.m[m.k].status==="warn");
+  $("k3").innerHTML=`${ev.pass}<small>/ ${METRICS.length}</small>`;
+  pill($("k3p"),fails.length?"fail":warns.length?"warn":"pass");
+  $("k3s").textContent=fails.length?`불합격: ${fails.map(m=>m.short).join(", ")}`:warns.length?`주의: ${warns.map(m=>m.short).join(", ")}`:"모든 지표가 규격 안";
+  const nf=W.filter(w=>w.lv==="fail").length;
+  $("k4").innerHTML=`${W.length}<small>건</small>`;
+  pill($("k4p"),nf?"fail":W.length?"warn":"pass", nf?`심각 ${nf}`:W.length?"주의":"없음");
+  $("k4s").textContent=W.length?W[0].t:"공정 규칙 위반 없음";
+}
+function renderGauges(ev){
+  const box=$("gauges"); box.innerHTML="";
+  METRICS.forEach(m=>{
+    const P=ev.pred[m.k], R=ev.m[m.k], [a,b]=m.axis, pos=v=>Math.min(100,Math.max(0,(v-a)/(b-a)*100));
+    const spL=m.lsl!=null?pos(m.lsl):0, spR=pos(m.usl);
+    const statusLabel=R.status;
+    const bar=el("div",{class:"bar","aria-hidden":"true"},
+      el("div",{class:"tr"}),
+      el("div",{class:"sp"+(m.lsl==null?" open-l":""),style:`left:${spL}%;width:${spR-spL}%`}),
+      el("div",{class:"w",style:`left:${pos(P.lo)}%;width:${Math.max(0.5,pos(P.hi)-pos(P.lo))}%`}),
+      el("div",{class:"mk c-"+statusLabel,style:`left:${pos(P.v)}%`}));
+    const foot=el("div",{class:"gf"},
+      el("span",{text:"규격 "+specText(m)}),
+      el("span",{text:m.logit?`버닝 발생 확률 ${fmt(P.v,1)}%`:`불량 ${pct(R.p,R.p<0.001?2:1)}% · Cpk ${fmt(R.cpk,2)}`}));
+    const sign=m.k==="dia"&&P.v>0?"+":"";
+    box.append(el("div",{class:"gauge"},
+      el("div",{class:"gh"},el("span",{class:"gn",text:m.label}),el("span",{class:"pill s-"+statusLabel,text:ST[statusLabel]})),
+      el("div",{style:"display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap"},
+        (()=>{const g=el("div",{class:"gv"});g.append(sign+fmt(P.v,m.dec)," ",el("small",{text:m.unit}));return g})(),
+        el("span",{class:"ci",text:`95% ${fmt(P.lo,m.dec)} ~ ${fmt(P.hi,m.dec)}`})),
+      bar, foot));
+  });
+}
+function renderWarns(W){
+  const ul=$("warns"); ul.innerHTML="";
+  if(!W.length){ul.append(el("li",{},el("span",{class:"pill s-pass",text:"정상"}),el("div",{},el("div",{class:"t",text:"현재 조건에서 걸리는 공정 규칙이 없습니다."}),el("div",{class:"d",text:"드레싱 주기, 냉각수·절삭유 온도, 공장 온도, 진동 등을 계속 감시합니다."}))));return;}
+  W.forEach(w=>ul.append(el("li",{},el("span",{class:"pill s-"+w.lv,text:w.lv==="fail"?"심각":"주의"}),el("div",{},el("div",{class:"t",text:w.t}),el("div",{class:"d",text:w.d})))));
+}
+function renderWhatif(ev,base){
+  const t=$("whatif"); t.innerHTML="";
+  t.append(el("thead",{},el("tr",{},el("th",{text:"품질 특성"}),el("th",{class:"n",text:"기준 조건"}),el("th",{class:"n",text:"현재 조건"}),el("th",{class:"n",text:"변화"}),el("th",{text:"판정"}))));
+  const tb=el("tbody");
+  METRICS.forEach(m=>{
+    const b=base.pred[m.k].v, c=ev.pred[m.k].v, d=c-b, s=ev.m[m.k].status;
+    tb.append(el("tr",{},el("td",{text:m.label+" ("+m.unit+")"}),el("td",{class:"n",text:fmt(b,m.dec)}),el("td",{class:"n",text:fmt(c,m.dec)}),
+      el("td",{class:"n "+(Math.abs(d)<Math.pow(10,-m.dec)?"muted":""),text:(d>=0?"+":"")+fmt(d,m.dec)}),el("td",{},el("span",{class:"pill s-"+s,text:ST[s]}))));
+  });
+  tb.append(el("tr",{},el("td",{},el("b",{text:"불량 확률"})),el("td",{class:"n",text:pct(base.defect)+"%"}),el("td",{class:"n",text:pct(ev.defect)+"%"}),
+    el("td",{class:"n",text:((ev.defect-base.defect)*100>=0?"+":"")+((ev.defect-base.defect)*100).toFixed(1)+"%p"}),el("td")));
+  t.append(tb);
+  const chips=$("diffChips"); chips.innerHTML="";
+  const ch=VARS.filter(v=>state.x[v.k]!==v.std);
+  if(!ch.length) chips.append(el("span",{class:"small muted",text:"현재 조건이 기준 조건과 같습니다. 왼쪽에서 조건을 바꾸거나 시나리오를 눌러 비교하세요."}));
+  ch.forEach(v=>{const d=decOf(v);chips.append(el("span",{class:"chip"},v.label+" ",el("b",{text:fmt(v.std,d)+" → "+fmt(state.x[v.k],d)}),` ${v.unit}`));});
+}
+
+/* 민감도 */
+let sensChart=null, validChart=null;
+function sensValue(x,target){
+  if(target==="defect") return evaluate(x).defect*100;
+  return predict(x)[target].v;
+}
+function renderSens(){
+  if(!window.Chart) return;
+  const tgt=state.sensTarget, unit=tgt==="defect"?"%p":MI[tgt].unit;
+  const rows=VARS.map(v=>{
+    const h=(v.max-v.min)*0.1;
+    const up={...state.x,[v.k]:Math.min(v.max,state.x[v.k]+h)}, dn={...state.x,[v.k]:Math.max(v.min,state.x[v.k]-h)};
+    return {v, d:sensValue(up,tgt)-sensValue(dn,tgt)};
+  }).sort((a,b)=>Math.abs(b.d)-Math.abs(a.d)).slice(0,10);
+  const bad=tok("--bad"), ok=tok("--ok"), acc=tok("--accent"), muted=tok("--muted"), line=tok("--line");
+  const m=MI[tgt], twoSided=m&&m.lsl!=null&&!m.logit;
+  const colors=rows.map(r=>twoSided?acc:(r.d>0?bad:ok));
+  const data={labels:rows.map(r=>r.v.label),datasets:[{data:rows.map(r=>+r.d.toFixed(4)),backgroundColor:colors,borderRadius:3,barThickness:16}]};
+  const opts={indexAxis:"y",responsive:true,maintainAspectRatio:false,animation:false,
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw>=0?"+":""}${c.raw} ${unit} (조건 +10% 범위 이동 시 −10% 대비)`}}},
+    scales:{x:{grid:{color:line},ticks:{color:muted,font:{family:"IBM Plex Mono"}},title:{display:true,text:"변화량 ("+unit+")",color:muted}},
+            y:{grid:{display:false},ticks:{color:tok("--fg"),font:{family:"IBM Plex Sans KR",size:12}}}}};
+  if(!sensChart) sensChart=new Chart($("sensChart"),{type:"bar",data,options:opts});
+  else{sensChart.data=data;sensChart.options=opts;sensChart.update("none");}
+}
+
+/* 최적 조건 */
+function runOpt(){
+  const x0={...state.x}; state.opt=optimize(x0); state.optFor=x0; renderOpt();
+  state.plan=plans(x0,state.opt); renderDecision();
+}
+
+/* ───────── 관리자 판단 ───────── */
+function renderDecision(){
+  const pl=state.plan; if(!pl) return;
+  $("decBody").classList.remove("stale");
+  const P=econParams(), E=econ(pl,P), R=recommend(pl,E,state.x), ev=pl.ev, base=evaluate(STD);
+  state.dec={E,R,P};
+  $("decCtx").textContent="판단 대상: "+ctxLabel();
+  // 권장 판단
+  const rb=$("recBox"); rb.innerHTML="";
+  rb.append(el("div",{class:"rec-h"},el("span",{class:"small muted",text:"권장 판단"}),
+    el("span",{class:"rec-act c-"+ACT[R.choice].cls,text:ACT[R.choice].label}),
+    el("span",{class:"pill s-"+(R.forced?"fail":"pass"),text:R.forced?"품질·설비 안전 규칙":"경제성 기준"})),
+    el("p",{text:R.why+(R.econBest!==R.choice?` (규칙을 빼고 보면 ${ACT[R.econBest].label}의 순이익이 가장 큼)`:"")}));
+  // 근거
+  const ol=$("evList"); ol.innerHTML="";
+  const item=(title,...kids)=>ol.append(el("li",{},el("div",{class:"et",text:title}),...kids));
+  const bad=METRICS.filter(m=>ev.m[m.k].status!=="pass");
+  item(`예측 결과 — 불량 확률 ${pct(ev.defect)}% (기준 조건 ${pct(base.defect)}%), 예상 Cpk ${fmt(ev.cpk,2)}`,
+    el("ul",{},bad.length?bad.map(m=>{const P_=ev.pred[m.k];return el("li",{},el("b",{text:`${m.label} ${fmt(P_.v,m.dec)}${m.unit}`}),
+      ` — 규격 ${specText(m)}, ${m.logit?"버닝 발생 확률":"규격 이탈 확률"} ${m.logit?fmt(P_.v,1):pct(ev.m[m.k].p)}% · ${ST[ev.m[m.k].status]}`)}):el("li",{text:"8개 지표 모두 규격 안, 주의 지표 없음"})));
+  const dr=drivers(state.x);
+  const dbox=el("div");
+  if(!dr.length) dbox.append(el("div",{class:"small muted",text:"기준 조건에서 벗어난 인자가 불량을 키우지 않습니다. 남은 불량 확률은 공정 고유 변동에서 옵니다."}));
+  else{const mx=dr[0].d; dr.forEach(r=>{const d=decOf(r.v); dbox.append(el("div",{class:"drv"},
+    el("span",{text:`${r.v.label} ${fmt(r.to,d)}${r.v.unit} (기준 ${fmt(r.v.std,d)})`}),
+    el("span",{class:"bx"},el("i",{style:`width:${Math.max(4,r.d/mx*100)}%`})),
+    el("span",{class:"mono",text:`−${(r.d*100).toFixed(1)}%p`})));});}
+  item("원인 인자 — 기준값으로 되돌리면 줄어드는 불량 확률",dbox);
+  const W=warnings(state.x);
+  item(`공정 경고 ${W.length}건`,el("ul",{},W.length?W.map(w=>el("li",{},el("b",{text:(w.lv==="fail"?"[심각] ":"[주의] ")+w.t}))):el("li",{text:"걸린 규칙 없음"})));
+  const key=bad.length?bad.reduce((a,b)=>ev.m[b.k].p>ev.m[a.k].p?b:a):MI[ev.cpkKey];
+  const mm=model.by[key.k];
+  item("예측 신뢰도",el("ul",{},
+    el("li",{text:`모델: ${model.source[key.k]==="csv"?"실측 데이터로 다시 학습":"가상 데이터 800건 학습"} · 2차 회귀`}),
+    el("li",{},el("b",{text:key.label}),` 검증 R² ${fmt(mm.r2,3)}, 95% 예측 구간 ${fmt(ev.pred[key.k].lo,key.dec)} ~ ${fmt(ev.pred[key.k].hi,key.dec)}${key.unit}`)));
+  item("판단 규칙",el("ul",{},R.rules.map(t=>el("li",{text:t}))));
+  // 조치 버튼
+  const box=$("acts3"); box.innerHTML="";
+  const chg=cs=>cs.slice(0,3).map(c=>{const d=decOf(c.v);return `${c.v.label} ${fmt(c.from,d)}→${fmt(c.to,d)}${c.v.unit}`}).join(", ");
+  const desc={
+    stop:`라인 ${P.stopH}시간 정지 → ${[...pl.stop.maint,chg(pl.stop.changes)].filter(Boolean).join(", ")||"원인 점검"} 후 재가동`,
+    part:`운전 중 ${pl.part.changes.length?chg(pl.part.changes)+" 조정":"조건 유지"} (${P.partH}시간) + 전수검사(검출률 ${P.partDet}%)`,
+    run:`현재 조건 유지, 일반 검사(검출률 ${P.det}%)`};
+  const after={stop:pl.stop.ev,part:pl.part.ev,run:ev}, toX={stop:pl.stop.x,part:pl.part.x};
+  ["stop","part","run"].forEach(k=>{
+    const badges=[];
+    if(R.choice===k) badges.push(el("span",{class:"pill s-"+ACT[k].cls,text:"권장"}));
+    if(R.econBest===k) badges.push(el("span",{class:"pill s-pass",text:"순이익 최고"}));
+    if(!R.allowed.includes(k)) badges.push(el("span",{class:"pill s-fail",text:"규칙상 비권장"}));
+    const btns=el("div",{class:"ab"});
+    if(toX[k]) btns.append(el("button",{class:"btn sm",type:"button",text:"조치 후 조건 보기",onclick:()=>{applyX(toX[k],{id:ACT[k].label,name:"조치 후 조건"});toast(`${ACT[k].label} 후 조건을 화면에 적용했습니다.`);}}));
+    btns.append(el("button",{class:"btn k-"+k,type:"button",id:"act-"+k,text:ACT[k].label+" 선택",onclick:()=>recordDecision(k)}));
+    box.append(el("div",{class:"act k-"+k+(R.choice===k?" rec-on":"")},
+      el("div",{class:"at"},el("span",{class:"c-"+ACT[k].cls,text:ACT[k].label}),...badges), btns,
+      el("div",{class:"ad",text:desc[k]}),
+      el("div",{class:"as"},el("span",{text:`불량 ${pct(ev.defect)}% → ${pct(after[k].defect)}%`}),el("span",{text:`생산 ${Math.round(E[k].N)}개`}),el("b",{text:`순이익 ${man(E[k].net)}`}))));
+  });
+  renderEcon(E,R,P);
+}
+function recordDecision(k){
+  const d=state.dec; if(!d) return;
+  const now=new Date();
+  decs.save({id:"d"+now.getTime().toString(36)+Math.random().toString(36).slice(2,6),savedAt:now.toISOString(),
+    ctx:ctxLabel(),defect:+state.plan.ev.defect.toFixed(5),rec:d.R.choice,choice:k,net:Math.round(d.E[k].net),
+    best:d.R.econBest,note:$("decNote").value.trim(),inputs:{...state.x}});
+  $("decNote").value="";
+  toast(`${ACT[k].label} 판단을 기록했습니다.`);
+}
+function renderDecLog(){
+  const t=$("decLog"); t.innerHTML="";
+  $("decMode").textContent=decs.mode==="db"?"· 내 계정에 저장":"· 이 브라우저에 저장";
+  if(!decs.items.length){t.append(el("tbody",{},el("tr",{},el("td",{class:"empty",colspan:"6",text:"아직 기록된 판단이 없습니다. 위 버튼으로 정지·부분조치·계속작동 중 하나를 고르면 근거와 함께 남습니다."}))));return;}
+  t.append(el("thead",{},el("tr",{},el("th",{text:"시각"}),el("th",{text:"조건"}),el("th",{class:"n",text:"불량"}),el("th",{text:"권장 → 선택"}),el("th",{class:"n",text:"선택안 순이익"}),el("th",{text:""}))));
+  const tb=el("tbody");
+  decs.items.slice(0,30).forEach(h=>{
+    const w=new Date(h.savedAt), del=delBtn(()=>decs.remove(h.id));
+    const ch=ACT[h.choice]||ACT.run, rc=ACT[h.rec]||ACT.run;
+    tb.append(el("tr",{},el("td",{class:"mono small",text:`${w.getMonth()+1}/${w.getDate()} ${String(w.getHours()).padStart(2,"0")}:${String(w.getMinutes()).padStart(2,"0")}`}),
+      el("td",{},el("div",{text:h.ctx}),h.note?el("div",{class:"small muted",text:"메모: "+h.note}):null),
+      el("td",{class:"n",text:fmt(h.defect*100,1)+"%"}),
+      el("td",{},el("span",{class:"small muted",text:rc.label+" → "}),el("span",{class:"pill s-"+ch.cls,text:ch.label})),
+      el("td",{class:"n",text:man(h.net)}),el("td",{},del)));
+  });
+  t.append(tb);
+}
+function delBtn(fn){
+  const b=el("button",{class:"btn sm danger",type:"button",text:"삭제"}); let armed=false,tm;
+  b.addEventListener("click",()=>{if(!armed){armed=true;b.textContent="삭제 확인";tm=setTimeout(()=>{armed=false;b.textContent="삭제";},3000);return;}clearTimeout(tm);fn();});
+  return b;
+}
+
+/* ───────── 경제성 ───────── */
+let econChart=null;
+function buildEconForm(){
+  const f=$("econForm"), P=econParams(); f.innerHTML="";
+  ECON.forEach(e=>{
+    if(e.sec){f.append(el("div",{class:"sec",text:e.sec}));return;}
+    const inp=el("input",{type:"number",id:"e-"+e.k,min:"0",step:String(e.step),value:String(P[e.k])});
+    inp.addEventListener("input",()=>{const n=parseFloat(inp.value); if(!Number.isFinite(n)||n<0) return;
+      const s=LS.get("ckq-econ",{}); s[e.k]=n; LS.set("ckq-econ",s); renderDecision(); clearTimeout(setsTimer); setsTimer=setTimeout(renderSets,400);});
+    f.append(el("label",{for:"e-"+e.k,text:`${e.label} (${e.unit})`}),inp);
+  });
+  f.append(el("div",{style:"grid-column:1/-1;margin-top:8px"},el("button",{class:"btn sm",type:"button",text:"가정값 초기화",onclick:()=>{LS.set("ckq-econ",{});buildEconForm();renderDecision();renderSets();}})));
+}
+function renderEcon(E,R,P){
+  const K=["stop","part","run"], t=$("econTable"); t.innerHTML="";
+  t.append(el("thead",{},el("tr",{},el("th",{text:"항목"}),...K.map(k=>el("th",{class:"n"+(R.econBest===k?" best":"")},ACT[k].label,R.choice===k?" ★":"")))));
+  const rows=[
+    ["가동 시간",k=>fmt(E[k].T,2)+" h"],
+    ["시간당 생산량 (사이클 타임 반영)",k=>Math.round(P.rate*E[k].rf)+" 개/h"],
+    ["생산 수량",k=>Math.round(E[k].N).toLocaleString("ko-KR")+" 개"],
+    ["예상 불량률",k=>(E[k].p*100).toFixed(1)+" %"],
+    ["불량 수량 (검출 폐기 / 유출)",k=>`${E[k].Dd.toFixed(1)} / ${E[k].De.toFixed(1)} 개`],
+    ["공헌이익 (출하품)",k=>man(E[k].contrib)],
+    ["폐기 손실",k=>"−"+man(E[k].scrap).replace("−","")],
+    ["유출 클레임 위험비용",k=>"−"+man(E[k].claim).replace("−","")],
+    ["조치·검사 비용",k=>"−"+man(E[k].act).replace("−","")]];
+  const tb=el("tbody");
+  rows.forEach(([l,f])=>tb.append(el("tr",{},el("td",{text:l}),...K.map(k=>el("td",{class:"n"+(R.econBest===k?" best":""),text:f(k)})))));
+  tb.append(el("tr",{class:"total"},el("td",{text:"예상 순이익"}),...K.map(k=>el("td",{class:"n c-"+(E[k].net<0?"fail":"pass")+(R.econBest===k?" best":""),text:man(E[k].net)}))));
+  tb.append(el("tr",{},el("td",{class:"muted",text:"계속작동 대비"}),...K.map(k=>{const d=E[k].net-E.run.net;return el("td",{class:"n muted",text:k==="run"?"–":(d>=0?"+":"")+man(d)})})));
+  t.append(tb);
+  $("econNote").textContent=`★ = 권장 판단, 초록 열 = 순이익 최고. 검출된 불량은 폐기(변동원가 ${man(P.cost)} 손실), 놓친 불량은 출하 후 클레임(개당 ${man(P.claim)})으로 계산합니다. 정지·부분조치 후 불량률은 조치 후 조건의 예측값입니다. 연삭 이송을 늦추거나 스파크아웃을 늘리거나 드레싱을 자주 하면 시간당 생산량이 줄어듭니다.`;
+  if(!window.Chart) return;
+  const col={stop:tok("--bad"),part:tok("--warn"),run:tok("--ok")}, muted=tok("--muted"), line=tok("--line");
+  const data={labels:K.map(k=>ACT[k].label),datasets:[{data:K.map(k=>Math.round(E[k].net/10000)),backgroundColor:K.map(k=>col[k]),borderRadius:4,barThickness:38}]};
+  const opts={responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`순이익 ${c.raw.toLocaleString("ko-KR")}만원`}}},
+    scales:{y:{title:{display:true,text:"예상 순이익 (만원)",color:muted},grid:{color:line},ticks:{color:muted}},x:{grid:{display:false},ticks:{color:tok("--fg"),font:{weight:"bold"}}}}};
+  if(!econChart) econChart=new Chart($("econChart"),{type:"bar",data,options:opts});
+  else{econChart.data=data;econChart.options=opts;econChart.update("none");}
+}
+
+/* ───────── 테스트 조건 세트 ───────── */
+let setsTimer=0; const setCache=new Map();
+function setResult(s){
+  const P=econParams(), key=JSON.stringify(s.x)+JSON.stringify(P)+modelVer;
+  if(!setCache.has(key)){const pl=plans(s.x), E=econ(pl,P); setCache.set(key,{pl,E,R:recommend(pl,E,s.x)});}
+  return setCache.get(key);
+}
+function renderSets(){
+  const t=$("sets"); t.innerHTML="";
+  LS.set("ckq-sets",state.sets);
+  if(!state.sets.length){t.append(el("tbody",{},el("tr",{},el("td",{class:"empty",colspan:"9",text:"올린 세트가 없습니다. 엑셀 파일(크랭크샤프트_테스트조건_10세트.xlsx)을 올리거나 [예시 10세트 불러오기]를 누르세요."}))));return;}
+  t.append(el("thead",{},el("tr",{},el("th",{text:"세트"}),el("th",{text:"설명"}),el("th",{class:"n",text:"바뀐 인자"}),el("th",{class:"n",text:"불량 확률"}),el("th",{class:"n",text:"Cpk"}),el("th",{text:"불합격 지표"}),el("th",{class:"n",text:"경고"}),el("th",{text:"권장 판단"}),el("th",{text:""}))));
+  const tb=el("tbody");
+  state.sets.forEach(s=>{
+    const {pl,R}=setResult(s), ev=pl.ev, n=VARS.filter(v=>s.x[v.k]!==v.std).length;
+    const cur=state.ctx&&state.ctx.id===s.id&&state.ctx.name===s.name;
+    tb.append(el("tr",{class:cur?"cur":""},el("td",{class:"mono",text:s.id}),el("td",{text:s.name}),el("td",{class:"n",text:String(n)}),
+      el("td",{class:"n c-"+(ev.defect<0.02?"pass":ev.defect<0.1?"warn":"fail"),text:pct(ev.defect)+"%"}),
+      el("td",{class:"n",text:fmt(ev.cpk,2)}),
+      el("td",{class:"small",text:METRICS.filter(m=>ev.m[m.k].status==="fail").map(m=>m.short).join(", ")||"–"}),
+      el("td",{class:"n",text:String(warnings(s.x).length)}),
+      el("td",{},el("span",{class:"pill s-"+ACT[R.choice].cls,text:ACT[R.choice].label})),
+      el("td",{},el("button",{class:"btn sm"+(cur?" primary":""),type:"button",text:cur?(state.ctx.manual?"다시 적용":"적용됨"):"화면에 적용",
+        onclick:()=>{applyX(s.x,{id:s.id,name:s.name});toast(`${s.id} 조건을 적용했습니다. 관리자 판단을 확인하세요.`);$("decision").scrollIntoView({behavior:"smooth",block:"start"});}}))));
+  });
+  t.append(tb);
+}
+
+/* ───────── 엑셀·CSV 읽기 ───────── */
+function keyOf(h){
+  h=String(h==null?"":h).replace(/^﻿/,"").trim(); if(!h) return null;
+  const m=h.match(/\(([A-Za-z_]+)\)\s*$/), k=m?m[1]:h;
+  if(k in STD||MI[k]||k==="id"||k==="name") return k;
+  const v=VARS.find(v=>h.startsWith(v.label))||METRICS.find(mm=>h.startsWith(mm.label)); if(v) return v.k;
+  if(/^(세트|set)/i.test(h)) return "id"; if(/^(설명|이름|name)/i.test(h)) return "name";
+  return null;
+}
+function csvToGrid(text){return text.replace(/\r/g,"").split("\n").map(l=>l.split(",").map(c=>c.trim().replace(/^"|"$/g,"")));}
+function readTable(file){
+  return new Promise((res,rej)=>{
+    const isCsv=/\.csv$/i.test(file.name), fr=new FileReader();
+    fr.onerror=()=>rej(new Error("파일을 읽지 못했습니다."));
+    fr.onload=()=>{
+      try{
+        let grid;
+        if(isCsv) grid=csvToGrid(String(fr.result));
+        else{
+          if(!window.XLSX) throw new Error("엑셀 읽기 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하거나 CSV로 저장해 올리세요.");
+          const wb=XLSX.read(fr.result,{type:"array"});
+          const name=wb.SheetNames.includes("조건세트")?"조건세트":wb.SheetNames[0];
+          grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:""});
+        }
+        const hi=grid.findIndex(r=>r.filter(c=>{const k=keyOf(c);return k&&k!=="id"&&k!=="name";}).length>=3);
+        if(hi<0) throw new Error("열 제목 줄을 찾지 못했습니다. 조건 코드(ws, rpm, feed …)가 들어간 열 제목이 3개 이상 필요합니다.");
+        const keys=grid[hi].map(keyOf), rows=[];
+        grid.slice(hi+1).forEach(r=>{
+          const o={}; let num=0;
+          keys.forEach((k,i)=>{if(!k) return; const c=r[i];
+            if(k==="id"||k==="name"){if(c!==""&&c!=null) o[k]=String(c).trim(); return;}
+            const n=typeof c==="number"?c:parseFloat(c); if(Number.isFinite(n)){o[k]=n;num++;}});
+          if(num) rows.push(o);
+        });
+        if(!rows.length) throw new Error("숫자 데이터 행이 없습니다.");
+        res({rows,keys:keys.filter(Boolean)});
+      }catch(e){rej(e);}
+    };
+    isCsv?fr.readAsText(file,"utf-8"):fr.readAsArrayBuffer(file);
+  });
+}
+async function onSetFile(file){
+  const msg=$("setMsg");
+  try{
+    const {rows,keys}=await readTable(file);
+    const out=[]; let clipped=0;
+    rows.forEach((o,i)=>{const x={...STD};
+      VARS.forEach(v=>{if(Number.isFinite(o[v.k])){const c=Math.min(v.max,Math.max(v.min,o[v.k])); if(c!==o[v.k]) clipped++; x[v.k]=c;}});
+      out.push({id:o.id||`#${i+1}`,name:o.name||`${file.name} ${i+1}행`,x});});
+    const miss=VARS.filter(v=>!keys.includes(v.k)).length;
+    msg.className="small c-pass";
+    msg.textContent=`${file.name}에서 ${out.length}개 세트를 읽었습니다. 아래 미리보기를 확인하고 [적용]을 누르세요.${miss?` 없는 조건 열 ${miss}개는 기준값으로 채웁니다.`:""}${clipped?` 범위를 벗어난 값 ${clipped}개는 최소·최대값으로 맞췄습니다.`:""}`;
+    showStage(file.name,out);
+  }catch(e){msg.className="small c-fail";msg.textContent="올리지 못했습니다: "+e.message;}
+}
+// 업로드 미리보기 → [적용] 버튼으로 반영
+function showStage(fname,sets){
+  const box=$("setStage"); box.innerHTML=""; box.hidden=false;
+  const close=()=>{box.hidden=true;box.innerHTML="";};
+  const apply=mode=>{
+    state.sets=mode==="add"?[...state.sets,...sets]:sets.map(s=>({...s,x:{...s.x}}));
+    setCache.clear(); close();
+    const first=sets[0];
+    applyX(first.x,{id:first.id,name:first.name});
+    $("setMsg").className="small c-pass";
+    $("setMsg").textContent=`${fname}의 ${sets.length}개 세트를 ${mode==="add"?"목록에 추가":"목록에 적용"}했고, 첫 세트(${first.id})를 화면에 적용했습니다. 다른 세트는 행의 [화면에 적용]으로 바꿉니다.`;
+    toast(`${first.id} 조건을 적용했습니다.`);
+  };
+  const t=el("table");
+  t.append(el("thead",{},el("tr",{},el("th",{text:"세트"}),el("th",{text:"설명"}),el("th",{class:"n",text:"바뀐 인자"}),el("th",{class:"n",text:"예상 불량 확률"}),el("th",{text:"권장 판단"}))));
+  const tb=el("tbody");
+  sets.forEach(s=>{const {pl,R}=setResult(s), n=VARS.filter(v=>s.x[v.k]!==v.std).length, dft=pl.ev.defect;
+    tb.append(el("tr",{},el("td",{class:"mono",text:s.id}),el("td",{text:s.name}),el("td",{class:"n",text:String(n)}),
+      el("td",{class:"n c-"+(dft<0.02?"pass":dft<0.1?"warn":"fail"),text:pct(dft)+"%"}),
+      el("td",{},el("span",{class:"pill s-"+ACT[R.choice].cls,text:ACT[R.choice].label}))));});
+  t.append(tb);
+  box.append(el("div",{class:"sh"},el("b",{text:`업로드 미리보기 · ${fname} · ${sets.length}세트`}),
+    el("div",{class:"btnrow"},
+      el("button",{class:"btn primary",type:"button",id:"stageApply",text:"적용",onclick:()=>apply("replace")}),
+      el("button",{class:"btn",type:"button",id:"stageAdd",text:"기존 목록에 추가",onclick:()=>apply("add")}),
+      el("button",{class:"btn ghost",type:"button",text:"취소",onclick:()=>{close();$("setMsg").className="small muted";$("setMsg").textContent="업로드를 취소했습니다. 기존 목록은 그대로입니다.";}}))),
+    el("div",{class:"tscroll"},t),
+    el("p",{class:"small muted",style:"margin:8px 0 0",text:"[적용] = 목록을 이 파일로 바꾸고 첫 세트를 화면에 적용합니다."}));
+  box.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function renderOpt(){
+  const box=$("optBody"); box.innerHTML=""; box.style.opacity="1";
+  const o=state.opt; if(!o) return;
+  const better=o.base.defect-o.ev.defect;
+  box.append(el("div",{class:"opt-sum"},
+    el("div",{},el("div",{class:"small muted",text:"불량 확률"}),el("div",{class:"big"},`${pct(o.base.defect)}%`,el("span",{class:"arrow",text:"→"}),el("span",{class:o.ev.defect<0.02?"c-pass":o.ev.defect<0.1?"c-warn":"c-fail",text:pct(o.ev.defect)+"%"}))),
+    el("div",{},el("div",{class:"small muted",text:"예상 Cpk (최저)"}),el("div",{class:"big"},fmt(o.base.cpk,2),el("span",{class:"arrow",text:"→"}),fmt(o.ev.cpk,2))),
+    el("div",{},el("div",{class:"small muted",text:"합격 지표"}),el("div",{class:"big"},`${o.base.pass}`,el("span",{class:"arrow",text:"→"}),`${o.ev.pass} / ${METRICS.length}`))));
+  if(!o.changes.length||better<0.0005){
+    box.append(el("div",{class:"empty",text:"현재 조건이 이미 최적에 가깝습니다. 바꿀 수 있는 조건으로는 불량 확률을 더 낮추기 어렵습니다."}));
+    $("optApply").disabled=true; return;
+  }
+  $("optApply").disabled=false;
+  const t=el("table");
+  t.append(el("thead",{},el("tr",{},el("th",{text:"조건"}),el("th",{class:"n",text:"현재"}),el("th",{class:"n",text:"이 값으로 바꾸세요"}),el("th",{class:"n",text:"권장 범위"}))));
+  const tb=el("tbody");
+  o.changes.slice(0,8).forEach(c=>{const d=decOf(c.v);
+    tb.append(el("tr",{},el("td",{text:`${c.v.label} (${c.v.unit})`}),el("td",{class:"n",text:fmt(c.from,d)}),el("td",{class:"n"},el("b",{text:fmt(c.to,d)})),el("td",{class:"n muted",text:`${fmt(c.lo,d)} ~ ${fmt(c.hi,d)}`})));});
+  t.append(tb);
+  box.append(el("div",{class:"tscroll"},t));
+  const fixed=VARS.filter(v=>!v.ctrl).map(v=>v.label).join(", ");
+  box.append(el("p",{class:"small muted",style:"margin:8px 0 0",text:`현장 상태(${fixed})는 지금 값으로 고정하고, 설정 가능한 조건만 기준값 ±30% 공정 창 안에서 조정했습니다. 권장 범위는 불량 확률이 최적값 +0.5%p 안에 머무는 구간입니다.`}));
+}
+
+/* ───────── 관계표 ───────── */
+function renderMatrix(){
+  const t=$("mx"); t.innerHTML="";
+  const head=el("tr",{},el("th",{text:"조건 ↑"}),...METRICS.map(m=>el("th",{text:m.short})));
+  t.append(el("thead",{},head));
+  const tb=el("tbody"), width={dia:16,round:3,cyl:5,ra:0.2,runout:20,hrc:8,case:2,burn:30};
+  GROUPS.forEach(g=>{
+    tb.append(el("tr",{class:"grp"},el("td",{colspan:String(METRICS.length+1),text:g.label})));
+    VARS.filter(v=>v.g===g.k).forEach(v=>{
+      const h=(v.max-v.min)*0.25, up=predict({...STD,[v.k]:Math.min(v.max,v.std+h)}), dn=predict({...STD,[v.k]:Math.max(v.min,v.std-h)});
+      tb.append(el("tr",{},el("td",{text:v.label}),...METRICS.map(m=>{
+        const e=(up[m.k].v-dn[m.k].v)/width[m.k], a=Math.abs(e);
+        if(a<0.08) return el("td",{},el("span",{class:"cell none",text:"·"}));
+        const arrow=(e>0?"▲":"▼").repeat(a>=0.25?2:1);
+        const two=m.lsl!=null&&!m.logit;
+        const cls=two?"neu":e>0?"up-bad":"dn-good";
+        return el("td",{title:`${v.label} ↑ → ${m.label} ${e>0?"증가":"감소"}`},el("span",{class:"cell "+cls,text:arrow}));
+      })));
+    });
+  });
+  t.append(tb);
+  const csv=METRICS.filter(m=>model.source[m.k]==="csv").length;
+  $("mxSrc").textContent=csv?`실측 학습 ${csv}개 지표 반영`:"가상 데이터 모델";
+}
+
+/* ───────── 모델 패널 ───────── */
+function renderModel(){
+  const csv=METRICS.filter(m=>model.source[m.k]==="csv");
+  pill($("modelPill"),csv.length?"pass":"warn",csv.length?`실측 ${model.csvRows}건 반영`:"가상 데이터");
+  $("modelDesc").textContent=csv.length
+    ? `실측 데이터로 다시 맞춘 지표: ${csv.map(m=>m.short).join(", ")}. 나머지는 가상 데이터 모델을 씁니다.`
+    : "공정 지식으로 만든 가상 가공 데이터 800건으로 학습했습니다. 640건 학습, 160건 검증. 입력 22개의 1차·2차항과 주요 교호작용 6개를 씁니다.";
+  const mm=model.by[state.validMetric], m=MI[state.validMetric];
+  const s=$("modelStat"); s.innerHTML="";
+  [["R²",fmt(mm.r2,3)],["RMSE",fmt(mm.rmse,m.dec+1)+" "+m.unit],[mm.valid.holdout?"검증 건수":"학습 건수(적합도)",String(mm.valid.n)],["예측 표준편차",m.logit?"logit "+fmt(mm.sigma,2):fmt(mm.sigma,m.dec+1)+" "+m.unit]]
+    .forEach(([a,b])=>s.append(el("div",{},el("span",{class:"small muted",text:a}),el("b",{text:b}))));
+  if(!window.Chart) return;
+  const pts=mm.valid.pred.map((p,i)=>({x:mm.valid.act[i],y:p}));
+  const all=[...mm.valid.pred,...mm.valid.act]; const lo=Math.min(...all), hi=Math.max(...all);
+  const muted=tok("--muted"), line=tok("--line"), acc=tok("--accent");
+  const data={datasets:[
+    {type:"scatter",label:"검증 데이터",data:pts,backgroundColor:acc+"99",pointRadius:3},
+    {type:"line",label:"예측 = 실측",data:[{x:lo,y:lo},{x:hi,y:hi}],borderColor:muted,borderDash:[5,4],borderWidth:1,pointRadius:0}]};
+  const opts={responsive:true,maintainAspectRatio:false,animation:false,
+    plugins:{legend:{labels:{color:muted,boxWidth:10}},tooltip:{callbacks:{label:c=>`실측 ${fmt(c.raw.x,m.dec)} / 예측 ${fmt(c.raw.y,m.dec)} ${m.unit}`}}},
+    scales:{x:{type:"linear",title:{display:true,text:`실측 ${m.label} (${m.unit})`,color:muted},grid:{color:line},ticks:{color:muted}},
+            y:{title:{display:true,text:`예측 (${m.unit})`,color:muted},grid:{color:line},ticks:{color:muted}}}};
+  if(!validChart) validChart=new Chart($("validChart"),{type:"scatter",data,options:opts});
+  else{validChart.data=data;validChart.options=opts;validChart.update("none");}
+}
+async function onCSV(file){
+    try{
+      const t=await readTable(file);
+      if(!METRICS.some(m=>t.keys.includes(m.k))) throw new Error("측정 결과 열(dia, round, cyl, ra, runout, hrc, case, burn 중 하나 이상)이 없습니다. 조건만 있는 파일은 위 '테스트 조건 세트'에 올리세요.");
+      const used=t.keys;
+      const rows=t.rows.map(o=>{const x={...STD},y={};
+        VARS.forEach(v=>{if(Number.isFinite(o[v.k])) x[v.k]=o[v.k];});
+        METRICS.forEach(m=>{if(Number.isFinite(o[m.k])) y[m.k]=m.logit?logit(o[m.k]/100):o[m.k];});
+        return {x,y};});
+      modelVer++;
+      const r=mulberry(7); for(let i=rows.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[rows[i],rows[j]]=[rows[j],rows[i]];}
+      const done=[], skip=[];
+      METRICS.forEach(m=>{const n=rows.filter(x=>Number.isFinite(x.y[m.k])).length;
+        if(n>=20){model.by[m.k]=trainMetric(rows,m.k);model.source[m.k]="csv";done.push(`${m.short} ${n}건`);} else if(n>0) skip.push(`${m.short} ${n}건`);});
+      model.csvRows=rows.length;
+      const missing=VARS.filter(v=>!used.includes(v.k)).length;
+      $("csvMsg").className="small c-"+(done.length?"pass":"warn");
+      $("csvMsg").textContent=done.length
+        ? `${rows.length}행을 읽어 ${done.join(", ")}로 다시 학습했습니다.${skip.length?` 20건 미만이라 건너뜀: ${skip.join(", ")}.`:""}${missing?` 없는 조건 열 ${missing}개는 기준값으로 채웠습니다.`:""}`
+        : `지표별 실측값이 20건 미만이라 다시 학습하지 않았습니다. (${skip.join(", ")||"측정값 없음"})`;
+      const first=METRICS.find(m=>model.source[m.k]==="csv"); if(first){state.validMetric=first.k;$("validMetric").value=first.k;}
+      renderModel(); renderMatrix(); renderAll(); renderSets();
+    }catch(e){$("csvMsg").className="small c-fail";$("csvMsg").textContent="파일을 읽지 못했습니다: "+e.message+" 열 제목에 아래 열 이름(코드)을 쓰세요.";}
+}
+
+/* ───────── 이력 저장: 계정 저장소(db) → 없으면 이 브라우저 ───────── */
+const cloud={db:null,uid:null};
+function makeList(lsKey,colFn,render,keep){
+  const L={mode:"local",items:LS.get(lsKey,[]),slow:false,
+    attach(){
+      L.mode="db"; L.slow=false; render();
+      const timer=setTimeout(()=>{L.slow=true;render();},10000);
+      colFn().orderBy("savedAt","desc").limit(300).onSnapshot(snap=>{
+        if(!snap.metadata.fromCache){clearTimeout(timer);L.slow=false;}
+        L.items=snap.docs.map(d=>({id:d.id,...d.data()})).filter(keep||(()=>true)); render();
+      },()=>{clearTimeout(timer); L.mode="local"; L.items=LS.get(lsKey,[]); render();});
+    },
+    async save(rec){
+      if(L.mode==="db"){
+        try{await colFn().doc(rec.id).set(rec);return;}
+        catch(e){toast(e&&e.code==="quota_exceeded"?"저장 공간이 가득 찼습니다. 오래된 기록을 지워 주세요.":"계정 저장에 실패해 이 브라우저에 저장합니다."); L.mode="local";}
+      }
+      L.items=[rec,...L.items.filter(h=>h.id!==rec.id)]; LS.set(lsKey,L.items); render();
+    },
+    async remove(id){
+      if(L.mode==="db"){try{await colFn().doc(id).delete();return;}catch(e){toast("삭제하지 못했습니다. 다시 시도해 주세요.");return;}}
+      L.items=L.items.filter(h=>h.id!==id); LS.set(lsKey,L.items); render();
+    }};
+  return L;
+}
+const hist=makeList("ckq-hist",()=>cloud.db.collection("data/users/"+cloud.uid),renderHistory,h=>h.id[0]==="r");
+const decs=makeList("ckq-dec",()=>cloud.db.doc("data/users/"+cloud.uid+"/decisions").collection("log"),renderDecLog);
+async function initCloud(){
+  try{
+    if(!window.claude||!window.claude.use) return;
+    const [db,user]=await Promise.all([window.claude.use("db"),window.claude.use("user")]);
+    const uid=user?await user.id():null;
+    if(!db||!uid) return;
+    cloud.db=db; cloud.uid=uid; hist.attach(); decs.attach();
+  }catch(e){/* 이 브라우저 저장 유지 */}
+}
+function renderHistory(){
+  const t=$("hist"); t.innerHTML="";
+  $("storeMode").textContent=hist.slow?"저장소 응답 지연 — 잠시 후 다시 확인":hist.mode==="db"?"내 계정에 저장 · 다른 기기에서도 보임":"이 브라우저에 저장";
+  const all=hist.items;
+  const list=all.filter(h=>state.hfilter==="all"||(state.hfilter==="pass"?h.ok:!h.ok));
+  document.querySelectorAll("#hfilter button").forEach(b=>{
+    const f=b.dataset.f, n=all.filter(h=>f==="all"||(f==="pass"?h.ok:!h.ok)).length;
+    b.textContent={all:"전체",pass:"합격",fail:"불합격"}[f]+" "+n; b.setAttribute("aria-selected",String(f===state.hfilter));});
+  if(!list.length){
+    t.append(el("tbody",{},el("tr",{},el("td",{class:"empty",colspan:"7",text:all.length?"이 필터에 해당하는 기록이 없습니다.":"아직 저장된 예측이 없습니다. 조건을 맞춘 뒤 '현재 예측 저장'으로 첫 기록을 남기세요. 불러오기로 언제든 같은 조건을 다시 볼 수 있습니다."}))));
+    return;
+  }
+  t.append(el("thead",{},el("tr",{},el("th",{text:"이름"}),el("th",{text:"저장 시각"}),el("th",{text:"판정"}),el("th",{class:"n",text:"불량 확률"}),el("th",{class:"n",text:"Cpk"}),el("th",{text:"문제 지표"}),el("th",{class:"n",text:""}))));
+  const tb=el("tbody");
+  list.forEach(h=>{
+    const del=delBtn(()=>hist.remove(h.id));
+    const when=new Date(h.savedAt);
+    tb.append(el("tr",{},
+      el("td",{text:h.name}),
+      el("td",{class:"mono small",text:`${when.getMonth()+1}/${when.getDate()} ${String(when.getHours()).padStart(2,"0")}:${String(when.getMinutes()).padStart(2,"0")}`}),
+      el("td",{},el("span",{class:"pill s-"+(h.ok?"pass":"fail"),text:h.ok?"합격":"불합격"})),
+      el("td",{class:"n",text:fmt(h.defect*100,1)+"%"}),
+      el("td",{class:"n",text:fmt(h.cpk,2)}),
+      el("td",{class:"small muted",text:(h.issues||[]).join(", ")||"–"}),
+      el("td",{},el("div",{class:"acts"},el("button",{class:"btn sm",type:"button",text:"불러오기",onclick:()=>{applyX({...STD,...h.inputs},{id:"이력",name:h.name});toast(`'${h.name}' 조건을 불러왔습니다.`);window.scrollTo({top:0,behavior:"smooth"});}}),del))));
+  });
+  t.append(tb);
+}
+
+/* ───────── 이벤트 연결 ───────── */
+function init(){
+  if(!GROUPS.some(g=>g.k===state.tab)) state.tab="grind";
+  trainSynthetic();
+  const st=$("sensTarget");
+  st.append(el("option",{value:"defect",text:"종합 불량 확률"}),...METRICS.map(m=>el("option",{value:m.k,text:m.label})));
+  st.addEventListener("change",()=>{state.sensTarget=st.value;renderSens();});
+  const vm=$("validMetric"); vm.append(...METRICS.map(m=>el("option",{value:m.k,text:m.label}))); vm.value=state.validMetric;
+  vm.addEventListener("change",()=>{state.validMetric=vm.value;renderModel();});
+  document.querySelectorAll("[data-scen]").forEach(b=>b.addEventListener("click",()=>{applyX(SCEN[b.dataset.scen],{id:"시나리오",name:b.textContent});toast(b.textContent+" 시나리오를 적용했습니다.");}));
+  $("setFile").addEventListener("change",e=>{const f=e.target.files[0]; if(f) onSetFile(f); e.target.value="";});
+  $("setSample").addEventListener("click",()=>{state.sets=SAMPLE_SETS.map(s=>({...s,x:{...s.x}}));renderSets();$("setMsg").className="small muted";$("setMsg").textContent="예시 10세트를 불러왔습니다. 엑셀 예시 파일과 같은 값입니다.";});
+  $("setClear").addEventListener("click",()=>{state.sets=[];renderSets();});
+  buildEconForm();
+  $("resetAll").addEventListener("click",()=>{applyX(STD);toast("기준 조건으로 초기화했습니다.");});
+  $("resetTab").addEventListener("click",()=>{const x={...state.x};VARS.filter(v=>v.g===state.tab).forEach(v=>x[v.k]=v.std);applyX(x);});
+  $("optRun").addEventListener("click",()=>{runOpt();toast("현재 조건 기준으로 다시 계산했습니다.");});
+  $("optApply").addEventListener("click",()=>{if(!state.opt)return;applyX(state.opt.x);toast("추천 조건을 적용했습니다.");});
+  document.querySelectorAll("#hfilter button").forEach(b=>b.addEventListener("click",()=>{state.hfilter=b.dataset.f;renderHistory();}));
+  $("saveForm").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const ev=evaluate(state.x), now=new Date();
+    const name=$("saveName").value.trim()||`조건 ${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const rec={id:"r"+now.getTime().toString(36)+Math.random().toString(36).slice(2,6),name,savedAt:now.toISOString(),
+      inputs:{...state.x},results:Object.fromEntries(METRICS.map(m=>[m.k,+ev.pred[m.k].v.toFixed(4)])),
+      defect:+ev.defect.toFixed(5),cpk:+ev.cpk.toFixed(3),ok:ev.ok,
+      issues:METRICS.filter(m=>ev.m[m.k].status==="fail").map(m=>m.short)};
+    await hist.save(rec); $("saveName").value=""; toast(`'${name}' 저장했습니다.`);
+  });
+  $("csvFile").addEventListener("change",e=>{const f=e.target.files[0]; if(f) onCSV(f); e.target.value="";});
+  $("resetModel").addEventListener("click",()=>{trainSynthetic();$("csvMsg").textContent="가상 데이터 모델로 되돌렸습니다.";$("csvMsg").className="small muted";renderModel();renderMatrix();renderAll();});
+  const header=[...VARS.map(v=>v.k),...METRICS.map(m=>m.k)].join(",");
+  $("csvHeader").textContent=header;
+  $("copyHead").addEventListener("click",()=>{
+    const sel=()=>{const r=document.createRange();r.selectNodeContents($("csvHeader"));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+    try{navigator.clipboard.writeText(header).then(()=>toast("열 이름을 복사했습니다."),()=>{sel();toast("선택했습니다. Ctrl+C로 복사하세요.");});}catch(e){sel();}
+  });
+  const keys=$("keys");
+  [...VARS.map(v=>[v.k,`${v.label} (${v.unit})`]),...METRICS.map(m=>[m.k,`${m.label} (${m.unit})`])].forEach(([k,l])=>keys.append(el("div",{},el("code",{text:k})," ",l)));
+  if(!state.sets.length) state.sets=SAMPLE_SETS.map(s=>({...s,x:{...s.x}}));
+  buildTabs(); buildVars(); renderAll(); renderMatrix(); renderModel(); runOpt();
+  renderHistory(); renderDecLog(); renderSets();
+  initCloud();
+  const mq=matchMedia("(prefers-color-scheme: dark)");
+  const re=()=>{renderSens();renderModel();renderDecision();};
+  mq.addEventListener?mq.addEventListener("change",re):mq.addListener(re);
+  new MutationObserver(re).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+}
+// 테스트용 노출
+window.CKQ={evaluate,predict,warnings,optimize,plans,econ,econParams,recommend,onSetFile,SCEN,STD,applyX};
+init();
+})();
+</script>
